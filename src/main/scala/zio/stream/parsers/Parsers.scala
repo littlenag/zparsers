@@ -254,6 +254,10 @@ object Parser {
     }
   }
 
+  // An incomplete parse needs to be able to return a list of events to emit
+  // again with the co-routine like parsing structure
+  // could be made more performant by using special control flow structures that a quoted DSL could parse out
+  // co-routine makes passing state easier, since otherwise would have to thread through the parser combinator constructors
   sealed trait Incomplete[Token, Result] extends Parser[Token, Result] { outer =>
 
     def map[Result2](f: Result => Result2): Incomplete[Token, Result2] = new Incomplete[Token, Result2] {

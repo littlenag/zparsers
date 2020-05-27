@@ -139,6 +139,46 @@ object ParsersPlayground {
       stream[MouseClick] matching doubleClickSeq
     }
 
+    // An incomplete parse needs to be able to return a list of events to emit
+    // again with the co-routine like parsing structure
+    // could be made more performant by using special control flow structures that a quoted DSL could parse out
+    // co-routine makes passing state easier, since otherwise would have to thread through the parser combinator constructors
+
+    // using a co-routine feels very much like a transducer, or riemann transducer
+
+    // parser as transducer
+
+    val doubleClicksStream2 /* : Stream[DoubleClick] */ = quote {
+
+      // match on the last 10 events (sliding window)
+      stream[MouseClick] >>> Matcher.matchWindowed(10.sliding, doubleClickSeq)
+
+      // match on tumbling windows of 10 events
+      stream[MouseClick] >>> Matcher.matchWindowed(10.tumbling, doubleClickSeq)
+
+      // discard any events consumed by the parser
+      stream[MouseClick] >>> Matcher.matchCut(doubleClickSeq)
+
+      // retry the parser on the next event in the stream, discarding only the first event
+      stream[MouseClick] >>> Matcher.matchEvery(doubleClickSeq)
+
+      // Matcher: similar to state monad
+
+      // state is here to record information about emitted or dropped events
+      // parser => state, eventBuffer, streamContinuation => state, eventBuffer, streamContinuation
+
+      // parser => (state (may contains eventBuffer, will contain current parser state), nextEvent) => (state, List[Event] (to emit downstream))
+
+
+      // this would be pretty reasonable to implement in zio, ZMatcher, ZParser
+
+      // ZMatcher is a special kind of Transducer
+      // knows how to apply a ZParser, which is a special kind of parser combinator
+
+
+    }
+
+
     // From EventPatternComponent
     override def out /* : Stream[DoubleClick] */ = quote {
       in.filter(_.button == 1) matching doubleClickSeq
@@ -157,9 +197,32 @@ object ParsersPlayground {
   val ztransducer: ZTransducer[Any, _, MouseClick, DoubleClick.type] =
     MouseEvents.compile[ZioTransducer]
 
+  // parser combinators are
+  //   Input -> (Result, Input)
+
+  // riemann follows a similar style to react, both forward event to a children param
+  // react is more FRP on the Props, riemann is streaming,
+
+  // react implements the state monad transform
+  //   state -> (state, result)
+  //   Props -> State -> (State, Component)
+  // and implicitly passes events to child components
+
+  //https://www.sderosiaux.com/articles/2018/06/15/a-simple-way-to-write-parsers-using-the-state-monad/
+
   // akka streams only allow one in and one out for Flows
   // Zio Transducer and Conduit are one in and one out
   //
+
+  // there are three notions that need to be encoded
+  //   - streams - an infinite stream of data
+  //   - windows - a finite subset of a stream
+  //   - matcher -
+
+  // stream of windows?
+
+  // applying a stream to a window expr -> stream of windows
+  // applying a stream to a match expr -> ?
 
   // compile parser to
   //  - zio streams  -> ZTransducer? ZConduit?

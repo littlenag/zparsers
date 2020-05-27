@@ -10,9 +10,14 @@ object ZioStreamPlayground {
   val intStream: Stream[Nothing, Int] = Stream.fromIterable(0 to 100)
   val stringStream: Stream[Nothing, String] = intStream.map(_.toString)
 
-  intStream.runDrain
+  val s = ZSink.sum[Int]
 
-  intStream.aggregateAsyncWithin()
+  val x = intStream.run(s)
+
+
+  intStream.broadcast()
+
+  //intStream.aggregateAsyncWithin()
 
   //intStream.via()
 
