@@ -59,6 +59,8 @@ object ParsersPlayground {
 
   case object DoubleClick
 
+  /*
+
   // Clicks in, DoubleClicks out
   object MouseEvents
       extends EventPatternComponent[MouseClick, DoubleClick.type] {
@@ -174,9 +176,53 @@ object ParsersPlayground {
 
       // ZMatcher is a special kind of Transducer
       // knows how to apply a ZParser, which is a special kind of parser combinator
-
-
     }
+
+    */
+
+
+    // Matchers should probably stay as they are, could take Parser defined as coroutines
+    // maybe special case Matcher.fromCoroutine(..) in case it makes lots of sense
+
+    /*
+
+    what would a coroutine-based parser look like? pretty simple actually
+
+        val id = coroutine { (x: Int) => x }
+
+        val vowelcounts = coroutine { (s: String) =>
+          yieldval(s.count(_ == 'a'))
+          yieldval(s.count(_ == 'e'))
+          yieldval(s.count(_ == 'i'))
+          yieldval(s.count(_ == 'o'))
+          yieldval(s.count(_ == 'u'))
+        }
+
+        val button1 = filter(_.button == 1)
+
+        // A followed by another A within 50 ms, < 50.ms within, > 50.ms not within 50.ms?
+        val doubleClickSeq =
+          (button1 ~ (doubleClickCutoff, button1)).as(DoubleClick)
+
+        // A followed by another A within 50 ms
+        val doubleClickCR = coroutine { (ctx: StreamContext) =>
+          val b1 = next()
+          if (b1.button != 1) fail()
+
+          val b2 = nextWithin(50.ms)
+          if (b2.button != 1) fail()
+
+          yieldval(DoubleClick)
+        }
+
+
+// http://storm-enroute.com/coroutines/docs/faq/
+// http://reactors.io/
+       scala coroutines reactors
+
+// https://wiki.tcl-lang.org/page/parsing+with+coroutine
+// http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.74.6048&rep=rep1&type=pdf
+
 
 
     // From EventPatternComponent
@@ -196,6 +242,10 @@ object ParsersPlayground {
   // instantiating the graph would be a stream with a single in and single out
   val ztransducer: ZTransducer[Any, _, MouseClick, DoubleClick.type] =
     MouseEvents.compile[ZioTransducer]
+
+
+     */
+
 
   // parser combinators are
   //   Input -> (Result, Input)
