@@ -58,11 +58,19 @@ object ZioStreamSpecs extends Specification {
       } ^^ ((a,b,c) => if (c > b && b > a) 1 else 0 )
     )
 
-    "parse debug" in {
-      println("start ----- start")
-      val result = ZStream("(b)": _*) >>> matcher(parens)
-      run(result.runCollect) mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
+    "parse B expecting C" in {
+      val letterCMapped: Parser[Char, Int] = 'C' ^^ (_ => 0)
+
+      val result = ZStream("B": _*) >>> matcher(letterCMapped)
+
+      run(result.runCollect) mustEqual Seq(ParseFailure("expected 'C', got 'B'"), ParseEnded)
     }
+
+//    "parse debug" in {
+//      println("start ----- start")
+//      val result = ZStream("(b)": _*) >>> matcher(parens)
+//      run(result.runCollect) mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
+//    }
 
 
 //    "parse single space" in {

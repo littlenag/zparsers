@@ -87,6 +87,10 @@ package object parsers {
                       println(s"parser: $parser on input '$event' becomes -> parser: $derived")
 
                       (derived.complete(), derived) match {
+                        case (Left(Error(msg1)), Completed(value)) =>
+                          println(s"unexpected completion: $msg1 with value $value")
+                          (Cache[Event], initialParser, pr += ParseFailure(msg1) )
+
                         case (Left(Error(msg1)), _@Error(msg2)) =>
                           println(s"completion error: $msg1")
                           println(s"parser-error: $msg2")

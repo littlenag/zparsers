@@ -117,13 +117,13 @@ object Parser {
    */
   implicit def literal[Token: Equal: Show](token: Token): Parser[Token, Token] = new Incomplete[Token, Token] {
 
-    def innerComplete[R](seen: Set[Parser[Token, _]]) = -\/(Error(s"unexpected end of stream; expected '${token.shows}''"))
+    def innerComplete[R](seen: Set[Parser[Token, _]]) = -\/(Error(s"unexpected end of stream; expected '${token.shows}'"))
 
     def innerDerive(candidate: Token) = {
       val result: Parser[Token, Token] = if (candidate === token)
         completed(token)
       else
-        error(s"expected '${token.shows}', got '${candidate.shows}''")
+        error(s"expected '${token.shows}', got '${candidate.shows}'")
 
       State state result
     }

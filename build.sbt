@@ -16,9 +16,9 @@
 
 //import com.typesafe.sbt.SbtGit._
 
-organization := "com.codecommit"
+organization := "io.github.littlenag"
 
-name := "sparse"
+name := "zparsers" //"sparse"
 
 scalaVersion := "2.12.10"
 
@@ -31,8 +31,11 @@ resolvers += "Scalaz Bintray Repo" at "https://dl.bintray.com/scalaz/releases"
 val zioVersion = "1.0.0-RC20+43-6bbfac81-SNAPSHOT"
 
 libraryDependencies ++= Seq(
+  "com.lihaoyi" %% "sourcecode" % "0.1.9",
+
   "org.scalaz"         %% "scalaz-core"   % "7.2.30",
   "org.scalaz.stream"  %% "scalaz-stream" % "0.8.6a",
+
 
   "dev.zio"            %% "zio"           % zioVersion,
   "dev.zio"            %% "zio-streams"   % zioVersion,

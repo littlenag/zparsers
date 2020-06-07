@@ -70,15 +70,15 @@ object ParserSpecs extends Specification {
     }
 
     "fail to parse a single mismatched paren" in {
-      grammar must parseError("(").as("unexpected end of stream; expected )")
+      grammar must parseError("(").as("unexpected end of stream; expected ')'")
     }
 
     "fail to parse three mismatched parens with one match" in {
-      grammar must parseError("(((()").as("unexpected end of stream; expected )")
+      grammar must parseError("(((()").as("unexpected end of stream; expected ')'")
     }
 
     "fail to parse a mismatched closing paren" in {
-      grammar must parseError(")").as("expected (, got )")
+      grammar must parseError(")").as("expected '(', got ')'")
     }
   }
 

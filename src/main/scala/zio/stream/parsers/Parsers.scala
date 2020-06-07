@@ -116,7 +116,7 @@ object Parser {
 
     override val toString: String = s"lit(${token.show})"
 
-    def innerComplete[R](seen: Set[Parser[Token, _]]) = Left(Error(s"unexpected end of stream; expected '${token.show}''"))
+    def innerComplete[R](seen: Set[Parser[Token, _]]) = Left(Error(s"unexpected end of stream; expected '${token.show}'"))
 
     def innerDerive(candidate: Token) = {
       val result: Parser[Token, Token] = if (candidate === token)
@@ -265,7 +265,7 @@ object Parser {
       override def innerComplete[R](seen: Set[Parser[Token, _]]) =
         outer.complete[R](seen).bimap(identity, _ map f)
 
-      override def innerDerive(candidate: Token) = {
+      override def innerDerive(candidate: Token): State[Cache[Token], Parser[Token, Result2]] = {
         val x = outer innerDerive candidate
         x map {
               // didn't work
