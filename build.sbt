@@ -26,8 +26,9 @@ addCompilerPlugin("org.typelevel" %% "kind-projector" % "0.11.0" cross CrossVers
 
 resolvers += "Scalaz Bintray Repo" at "https://dl.bintray.com/scalaz/releases"
 
-//val zioVersion = "1.0.0-RC18-2"
-val zioVersion = "1.0.0-RC19-2+20-e3d5c945-SNAPSHOT"
+//"1.0.0-RC18-2"
+//"1.0.0-RC19-2+20-e3d5c945-SNAPSHOT"
+val zioVersion = "1.0.0-RC20+43-6bbfac81-SNAPSHOT"
 
 libraryDependencies ++= Seq(
   "org.scalaz"         %% "scalaz-core"   % "7.2.30",
