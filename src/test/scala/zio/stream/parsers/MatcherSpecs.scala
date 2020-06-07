@@ -38,6 +38,20 @@ import scala.util.matching.Regex
 object MatcherSpecs extends Specification {
   import Parser._
 
+  //"ZIO mapped parsers" should {
+
+    val litA: Parser[String, String] = "a"
+    val mapped0: Parser[String, Int] = litA ^^ (_ => 0)
+    val mapped1: Parser[String, Int] = mapped0 ^^ (1 +)
+
+    litA.complete()
+
+    //"parse fail even if mapped" in {
+      //mapped must parseComplete("()").as(1)
+    //}
+
+  //}
+
   "ZIO terminal parsers" should {
     lazy val parens: Parser[Char, Int] = (
       '(' ~> parens <~ ')' ^^ (1 +)
@@ -191,8 +205,8 @@ object MatcherSpecs extends Specification {
           case Completed(_) => State pure Left(Error("unexpected end of stream"))
           case e @ Error(_) => State pure Left(e)
 
-          case parser: Parser.Incomplete[T, R] =>
-            parser derive str.head flatMap inner(str.tail)
+          //case parser: Parser.Incomplete[T, R] => parser derive str.head flatMap inner(str.tail)
+          case parser: Parser.Incomplete[T, R] => parser derive str.head flatMap inner(str.tail)
         }
       }
     }

@@ -1,6 +1,4 @@
-package zio.stream.parsers
-
-import zio.stream.ZTransducer
+package playground
 
 object ParsersPlayground {
 

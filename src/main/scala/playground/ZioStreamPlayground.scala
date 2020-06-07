@@ -1,4 +1,4 @@
-package zio.stream.parsers
+package playground
 
 /**
   * @author Mark Kegel (mkegel@vast.com)

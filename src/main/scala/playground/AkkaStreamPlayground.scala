@@ -1,7 +1,7 @@
-package zio.stream.parsers
+package playground
 
-import akka.stream.{Attributes, FlowShape, Inlet, Outlet, SinkShape}
 import akka.stream.stage.{GraphStage, GraphStageLogic, InHandler, OutHandler}
+import akka.stream.{Attributes, FlowShape, Inlet, Outlet}
 
 class AkkaMap[A, B](f: A => B) extends GraphStage[FlowShape[A, B]] {
 
