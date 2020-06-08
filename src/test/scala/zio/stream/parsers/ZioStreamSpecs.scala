@@ -77,10 +77,9 @@ object ZioStreamSpecs extends Specification {
 //      run(result.runCollect) mustEqual Seq(ParseFailure("expected 'C', got 'B'"), ParseEnded)
 //    }
 
-    "parse debug" in {
-//      println("start ----- start")
+    "parse errors correctly" in {
       val result = ZStream("(b)": _*) >>> matcher(parens0)
-      run(result.runCollect) mustEqual Seq(ParseEnded) // Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
+      run(result.runCollect) mustEqual Seq(ParseIncomplete, ParseFailure("expected '(', got 'b'"), ParseFailure("expected '(', got ')'"), ParseEnded)
     }
 
 
