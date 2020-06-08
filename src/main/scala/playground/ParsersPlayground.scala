@@ -3,6 +3,19 @@ package playground
 object ParsersPlayground {
 
   /**
+   *
+   * a matcher is already a driver program for the coroutine that a parser generates
+   * parsers generates coroutines that compose, that's the only magic
+   *
+   * when a matcher evaluates the parser on the next input, could probably just compile
+   * the parser to a state monad?
+   *
+   * parser needs an algebra for communicating with the matcher
+   *
+   * matchers and handlers as names?
+   */
+
+  /**
   distinguish bounded (time or length) from unbounded from "instantaneous" operations
 
   Seq could require two bounded ops

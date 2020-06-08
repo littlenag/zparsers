@@ -84,9 +84,9 @@ package object parsers {
 
                       val (newCache, derived) = parser.derive(event).run(cache).value
 
-                      println(s"parser: $parser on input '$event' becomes -> parser: $derived")
+                      println(s">>input: '$event', parser: $parser ~> parser: $derived")
 
-                      (derived.complete(), derived) match {
+                      val ret = (derived.complete(), derived) match {
                         case (Left(Error(msg1)), Completed(value)) =>
                           println(s"unexpected completion: $msg1 with value $value")
                           (Cache[Event], initialParser, pr += ParseFailure(msg1) )
@@ -97,12 +97,15 @@ package object parsers {
                           (Cache[Event], initialParser, pr += ParseFailure(msg2) )
 
                         case (Left(Error(msg)), nextParser:Incomplete[Event, Result]) =>
-                          println(s"completion error: $msg")
+                          println(s"incomplete parse. error: $msg")
                           (newCache, nextParser, pr += ParseIncomplete )
 
                         case (Right(Completed(r)), _) =>
                           (Cache[Event], initialParser, pr += ParseSuccess(r) )
                       }
+
+                      println("<<")
+                      ret
                     }
 
                     Push.emit(Chunk.fromArray(toEmit.result().toArray)) -> (finalCache, finalParser, false)

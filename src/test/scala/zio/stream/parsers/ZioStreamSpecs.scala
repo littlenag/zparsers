@@ -41,9 +41,14 @@ object ZioStreamSpecs extends Specification {
     lazy val AB: Parser[Char, String] = letterA ~ letterB ^^ { (_,_) => "AB" }
 
     lazy val parens: Parser[Char, Int] = (
-        '(' ~> parens <~ ')' ^^ (1 +)
+      ('(' ~> parens) <~ ')' ^^ (1 +)
       | completed(0)
     )
+
+    lazy val parens0: Parser[Char, Int] = (
+      (('(' ~> parens) <~ ')')
+        | completed(0)
+      )
 
     // the lack of flatMap means that we can't actually detect three increasing values in an intuitive way
     lazy val increasing: Parser[Tick, Int] = (
@@ -58,19 +63,25 @@ object ZioStreamSpecs extends Specification {
       } ^^ ((a,b,c) => if (c > b && b > a) 1 else 0 )
     )
 
-    "parse B expecting C" in {
-      val letterCMapped: Parser[Char, Int] = 'C' ^^ (_ => 0)
-
-      val result = ZStream("B": _*) >>> matcher(letterCMapped)
-
-      run(result.runCollect) mustEqual Seq(ParseFailure("expected 'C', got 'B'"), ParseEnded)
-    }
-
-//    "parse debug" in {
-//      println("start ----- start")
-//      val result = ZStream("(b)": _*) >>> matcher(parens)
-//      run(result.runCollect) mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
+//    "parse B expecting C" in {
+//      val letterCMapped: Parser[Char, Int] = ('C' ~ 'C') ^^ ((_,_) => 2)
+//
+//      lazy val letterA: Parser[Char, Char] = 'A'
+//
+//      lazy val letterB: Parser[Char, Char] = 'B'
+//
+//      lazy val letterAorB: Parser[Char, Char] = letterA | letterB
+//
+//      val result = ZStream("C": _*) >>> matcher(letterAorB)
+//
+//      run(result.runCollect) mustEqual Seq(ParseFailure("expected 'C', got 'B'"), ParseEnded)
 //    }
+
+    "parse debug" in {
+//      println("start ----- start")
+      val result = ZStream("(b)": _*) >>> matcher(parens0)
+      run(result.runCollect) mustEqual Seq(ParseEnded) // Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
+    }
 
 
 //    "parse single space" in {

@@ -118,7 +118,7 @@ object Parser {
 
     def innerComplete[R](seen: Set[Parser[Token, _]]) = Left(Error(s"unexpected end of stream; expected '${token.show}'"))
 
-    def innerDerive(candidate: Token) = {
+    def innerDerive(candidate: Token): State[Cache[Token], Parser[Token, Token]] = {
       val result: Parser[Token, Token] = if (candidate === token)
         completed(token)
       else
@@ -154,6 +154,8 @@ object Parser {
 
   // it's somewhat important that these functions be lazy
   implicit class RichParser[Token, Result](left: => Parser[Token, Result]) {
+
+    def as[Result2](f: => Result2): Parser[Token, Result2] = left map (_ => f)
 
     // alias for map
     def ^^[Result2](f: Result => Result2): Parser[Token, Result2] = left map f
@@ -312,17 +314,25 @@ object Parser {
      * to advance over subsequent tokens, but cannot be completed then-and-there (attempting to do
      * so would result in an Error).
      */
-    final def derive(t: Token): State[Cache[Token], Parser[Token, Result]] = for {
-      cache <- State.get[Cache[Token]]
-      derived <- cache get (t -> this) map { thunk => State.pure[Cache[Token], Parser[Token, Result]](thunk()) } getOrElse {
-        for {
-          derived <- innerDerive(t)
+    final def derive(t: Token): State[Cache[Token], Parser[Token, Result]] = {
+      for {
+        cache <- State.get[Cache[Token]]
+        derived <- cache get (t -> this) map { thunk =>
+          val t = thunk()
+          println(s"--in cache: $t")
+          State.pure[Cache[Token], Parser[Token, Result]](t)
+        } getOrElse {
+          for {
+            _ <- State.pure(println(s"--not in cache"))
+            derived <- innerDerive(t)
+            _ <- State.pure(println(s"--after inner derive: $derived"))
 
-          cache2 <- State.get[Cache[Token]]
-          _ <- State set (cache2 + ((t, this) -> { () => derived }))
-        } yield derived
-      }
-    } yield derived
+            cache2 <- State.get[Cache[Token]]
+            _ <- State set (cache2 + ((t, this) -> { () => derived }))
+          } yield derived
+        }
+      } yield derived
+    }
 
     protected def innerDerive(candidate: Token): State[Cache[Token], Parser[Token, Result]]
   }
@@ -353,37 +363,47 @@ private[parsers] class SeqParser[Token, LR, RR](_left: => Parser[Token, LR], _ri
     crr <- right.complete[R](seen)
   } yield Completed((clr.result, crr.result))
 
-  def innerDerive(t: Token): State[Cache[Token], Parser[Token, LR ~ RR]] = (left, right) match {
-    case (Completed(_), Completed(_)) | (Completed(_), Error(_)) => State.pure(Error("unexpected end of stream"))
+  def innerDerive(t: Token): State[Cache[Token], Parser[Token, LR ~ RR]] = {
+    println(s"---seq innver derive. l=$left, r=$right")
 
-    case (Error(msg), _) => State.pure(Error(msg))
-    case (_, Error(msg)) => State.pure(Error(msg))
+    (left, right) match {
+      case (Completed(_), Completed(_)) | (Completed(_), Error(_)) => State.pure(Error("unexpected end of stream"))
 
-    case (Completed(lr), right: Incomplete[Token, RR]) => for {
-      rp <- right derive t
-    } yield rp map { (lr, _) }
+      case (Error(msg), _) => State.pure(Error(msg))
+      case (_, Error(msg)) => State.pure(Error(msg))
 
-    case (left: Incomplete[Token, LR], Completed(rr)) => for {
-      lp <- left derive t
-    } yield lp map { (_, rr) }
+      case (Completed(lr), right: Incomplete[Token, RR]) => for {
+        rp <- right derive t
+      } yield rp map { (lr, _) } // fail fast
 
-    case (left: Incomplete[Token, LR], right: Incomplete[Token, RR]) => {
-      left.complete(Set()).toOption map {
-        case Completed(lr) => {
+      case (left: Incomplete[Token, LR], Completed(rr)) => for {
+        lp <- left derive t
+      } yield lp map { (_, rr) } // fail fast
+
+      case (left: Incomplete[Token, LR], right: Incomplete[Token, RR]) => {
+        left.complete(Set()).toOption map {
+          case Completed(lr) => {
+            for {
+              lp <- left derive t
+              rp <- right derive t
+            } yield {
+              //val x = lp ~ right | (rp map { (lr, _) })
+              lp match {
+                case e @ Error(msg) => Error[Token, (LR, RR)](msg)
+                case _ => lp ~ right | (rp map { (lr, _) })
+              }
+            }
+          }
+        } getOrElse {
           for {
             lp <- left derive t
-            rp <- right derive t
-          } yield lp ~ right | (rp map { (lr, _) })
-        }
-      } getOrElse {
-        for {
-          lp <- left derive t
-        } yield {
-          //lp ~ right
+          } yield {
+            //lp ~ right
 
-          lp match {
-            case e @ Error(msg) => Error(msg)
-            case _ => lp ~ right
+            lp match {
+              case e @ Error(msg) => Error(msg)
+              case _ => lp ~ right
+            }
           }
         }
       }
