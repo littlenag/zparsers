@@ -119,10 +119,11 @@ object Parser {
     def innerComplete[R](seen: Set[Parser[Token, _]]) = Left(Error(s"unexpected end of stream; expected '${token.show}'"))
 
     def innerDerive(candidate: Token): State[Cache[Token], Parser[Token, Token]] = {
-      val result: Parser[Token, Token] = if (candidate === token)
-        completed(token)
-      else
-        error(s"expected '${token.show}', got '${candidate.show}'")
+      val result: Parser[Token, Token] =
+        if (candidate === token)
+          completed(token)
+        else
+          error(s"expected '${token.show}', got '${candidate.show}'")
 
       State pure result
     }
@@ -169,11 +170,14 @@ object Parser {
     // alias for andThen
     def ~[Result2](right: => Parser[Token, Result2]) = andThen(right)
 
-    def andThen[Result2](right: => Parser[Token, Result2]): Parser[Token, Result ~ Result2] =
+    def andThen[Result2](right: => Parser[Token, Result2]): Parser[Token, Result ~ Result2] = {
       new SeqParser(left, right)
+    }
 
     // alias for orElse
-    def |(right: => Parser[Token, Result]) = orElse(right)
+    def |(right: => Parser[Token, Result]) = {
+      orElse(right)
+    }
 
     def orElse(right: => Parser[Token, Result]): Parser[Token, Result] =
       new UnionParser(left, right)
@@ -236,14 +240,14 @@ object Parser {
   final case class Completed[Token, Result](result: Result) extends Parser[Token, Result] {
     def complete[R](seen: Set[Parser[Token, _]]) = \/-(this)
 
-    def map[Result2](f: Result => Result2) = Completed(f(result))
+    def map[Result2](f: Result => Result2): Completed[Token, Result2] = Completed(f(result))
   }
 
   // yep!  it's a string.  deal with it
   final case class Error[Token, Result](msg: String) extends Parser[Token, Result] {
     def complete[R](seen: Set[Parser[Token, _]]) = Left(Error(msg))
 
-    def map[Result2](f: Result => Result2) = Error(msg)
+    def map[Result2](f: Result => Result2): Error[Token, Result2] = Error(msg)
   }
 
   object Error {
@@ -252,7 +256,7 @@ object Parser {
       def empty = Error("")
 
       def combine(e1: Error[Token, Result], e2: Error[Token, Result]): Error[Token, Result] =
-        Error(s"${e1.msg} and ${e2.msg}")
+        Error(s"${e1.msg} and(0) ${e2.msg}")
     }
   }
 
@@ -262,22 +266,14 @@ object Parser {
   // co-routine makes passing state easier, since otherwise would have to thread through the parser combinator constructors
   sealed trait Incomplete[Token, Result] extends Parser[Token, Result] { outer =>
 
-    def map[Result2](f: Result => Result2): Incomplete[Token, Result2] = new Incomplete[Token, Result2] {
+    def map[Result2](f: Result => Result2): Parser[Token, Result2] = new Incomplete[Token, Result2] {
 
       override def innerComplete[R](seen: Set[Parser[Token, _]]) =
         outer.complete[R](seen).bimap(identity, _ map f)
 
       override def innerDerive(candidate: Token): State[Cache[Token], Parser[Token, Result2]] = {
         val x = outer innerDerive candidate
-        x map {
-              // didn't work
-          case Error(msg) => Error(msg)
-          case p =>
-            p.map(f) match {
-              case Error(msg) => Error(msg)
-              case p => p
-            }
-        }
+        x map { p => p.map(f) }
       }
 
       override lazy val toString: String = s"Incomplete.map"
@@ -364,9 +360,10 @@ private[parsers] class SeqParser[Token, LR, RR](_left: => Parser[Token, LR], _ri
   } yield Completed((clr.result, crr.result))
 
   def innerDerive(t: Token): State[Cache[Token], Parser[Token, LR ~ RR]] = {
-    println(s"---seq innver derive. l=$left, r=$right")
+    println(s"---seq inner derive. l=$left, r=$right")
 
     (left, right) match {
+      // deriving after completing is an error
       case (Completed(_), Completed(_)) | (Completed(_), Error(_)) => State.pure(Error("unexpected end of stream"))
 
       case (Error(msg), _) => State.pure(Error(msg))
@@ -374,23 +371,21 @@ private[parsers] class SeqParser[Token, LR, RR](_left: => Parser[Token, LR], _ri
 
       case (Completed(lr), right: Incomplete[Token, RR]) => for {
         rp <- right derive t
-      } yield rp map { (lr, _) } // fail fast
-
-      case (left: Incomplete[Token, LR], Completed(rr)) => for {
-        lp <- left derive t
-      } yield lp map { (_, rr) } // fail fast
+      } yield rp map { (lr, _) } // fails fast?
 
       case (left: Incomplete[Token, LR], right: Incomplete[Token, RR]) => {
-        left.complete(Set()).toOption map {
+        left.complete(Set()).toOption.map {
           case Completed(lr) => {
             for {
               lp <- left derive t
               rp <- right derive t
             } yield {
               //val x = lp ~ right | (rp map { (lr, _) })
-              lp match {
-                case e @ Error(msg) => Error[Token, (LR, RR)](msg)
-                case _ => lp ~ right | (rp map { (lr, _) })
+              (lp, rp) match {
+                case (Error(msg1), Error(msg2)) => Error[Token, LR ~ RR](s"$msg1 and(2) $msg2")
+                case (Error(_), _) => rp map { (lr, _) }
+                case (_, Error(_)) => lp ~ right
+                case (_,_) => lp ~ right | (rp map { (lr, _) })
               }
             }
           }
@@ -401,7 +396,7 @@ private[parsers] class SeqParser[Token, LR, RR](_left: => Parser[Token, LR], _ri
             //lp ~ right
 
             lp match {
-              case e @ Error(msg) => Error(msg)
+              case Error(msg) => Error(msg)
               case _ => lp ~ right
             }
           }
@@ -428,7 +423,7 @@ private[parsers] class UnionParser[Token, Result](_left: => Parser[Token, Result
         if (msg == msg2)
           Left(Error(msg))
         else
-          Left(Error(s"$msg and $msg2"))
+          Left(Error(s"$msg and(1) $msg2"))
       }
     }
   }

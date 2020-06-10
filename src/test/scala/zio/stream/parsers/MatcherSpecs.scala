@@ -40,11 +40,6 @@ object MatcherSpecs extends Specification {
 
   //"ZIO mapped parsers" should {
 
-    val litA: Parser[String, String] = "a"
-    val mapped0: Parser[String, Int] = litA ^^ (_ => 0)
-    val mapped1: Parser[String, Int] = mapped0 ^^ (1 +)
-
-    litA.complete()
 
     //"parse fail even if mapped" in {
       //mapped must parseComplete("()").as(1)
@@ -53,35 +48,44 @@ object MatcherSpecs extends Specification {
   //}
 
   "ZIO terminal parsers" should {
+    val litA: Parser[Char, Char] = 'a'
+    val mapped0: Parser[Char, Int] = litA ^^ (_ => 0)
+    val mapped1: Parser[Char, Int] = mapped0 ^^ (1 +)
+
     lazy val parens: Parser[Char, Int] = (
       '(' ~> parens <~ ')' ^^ (1 +)
       | completed(0)
     )
 
+    "parse single a" in {
+      val aa = (litA ~ litA) ^^ ((_,_) => 0)
+      aa must parseComplete("aaa").as(0)
+    }
+
     "parse single paren set spaces prepended" in {
       parens must parseComplete("()").as(1)
     }
 
-    "ZIO parse the parens" in {
-      val epsilon: Parser[Char, Unit] = Parser.completed(())
-      epsilon must parseComplete("").as(())
-    }
-
-
-    "ZIO parse the empty string" in {
-      val epsilon: Parser[Char, Unit] = Parser.completed(())
-      epsilon must parseComplete("").as(())
-    }
-
-    "ZIO parse a single token" in {
-      val a: Parser[Char, Char] = 'a'
-      a must parseComplete("a").as('a')
-    }
-
-    "ZIO produce an error when so defined" in {
-      val e: Parser[Char, Unit] = Parser.error("oogly boogly")
-      e must parseError("fubar").as("oogly boogly")
-    }
+//    "ZIO parse the parens" in {
+//      val epsilon: Parser[Char, Unit] = Parser.completed(())
+//      epsilon must parseComplete("").as(())
+//    }
+//
+//
+//    "ZIO parse the empty string" in {
+//      val epsilon: Parser[Char, Unit] = Parser.completed(())
+//      epsilon must parseComplete("").as(())
+//    }
+//
+//    "ZIO parse a single token" in {
+//      val a: Parser[Char, Char] = 'a'
+//      a must parseComplete("a").as('a')
+//    }
+//
+//    "ZIO produce an error when so defined" in {
+//      val e: Parser[Char, Unit] = Parser.error("oogly boogly")
+//      e must parseError("fubar").as("oogly boogly")
+//    }
   }
 
 //  "parentheses matching" should {

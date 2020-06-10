@@ -40,6 +40,8 @@ libraryDependencies ++= Seq(
   "dev.zio"            %% "zio"           % zioVersion,
   "dev.zio"            %% "zio-streams"   % zioVersion,
 
+  "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2",
+
   "co.fs2"             %% "fs2-core"      % "2.2.1",
 
   "com.lihaoyi"        %% "fastparse"     % "2.2.2",

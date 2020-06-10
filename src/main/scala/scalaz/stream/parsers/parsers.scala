@@ -346,7 +346,7 @@ private[parsers] class SeqParser[Token, LR, RR](_left: => Parser[Token, LR], _ri
     } yield lp map { (_, rr) }
 
     case (left: Incomplete[Token, LR], right: Incomplete[Token, RR]) => {
-      left.complete(Set()).toOption map {
+      left.complete(Set()).toOption.map {
         case Completed(lr) => {
           for {
             lp <- left derive t
