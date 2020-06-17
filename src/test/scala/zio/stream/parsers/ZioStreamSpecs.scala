@@ -20,9 +20,10 @@ import cats._
 import cats.implicits._
 import zio._
 import zio.stream._
-import org.specs2.mutable._
+import org.scalatest._
+import org.scalatest.matchers.must.Matchers._
 
-object ZioStreamSpecs extends Specification {
+class ZioStreamSpecs extends wordspec.AnyWordSpec {
   import Parser._
 
   case class Tick(v: Int, t: Int)
@@ -73,86 +74,32 @@ object ZioStreamSpecs extends Specification {
       parseEvents(aa)("AA") mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
     }
 
-    "parse single space" in {
+    "parse parens" in {
       parseEvents(parens)("()") mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
+      parseEvents(parens)("(((())))").takeRight(3) mustEqual Seq(ParseIncomplete, ParseSuccess(4), ParseEnded)
     }
 
-
-//    "parse B expecting C" in {
-//      val letterCMapped: Parser[Char, Int] = ('C' ~ 'C') ^^ ((_,_) => 2)
-//
-//      val result = ZStream("C": _*) >>> matcher(letterAorB)
-//
-//      run(result.runCollect) mustEqual Seq(ParseFailure("expected 'C', got 'B'"), ParseEnded)
-//    }
+    "parse one C expecting two" in {
+      val letterCMapped: Parser[Char, Int] = ('C' ~ 'C') ^^ ((_,_) => 2)
+      parseEvents(letterCMapped)("C") mustEqual Seq(ParseIncomplete, ParseEnded)
+    }
 
     "parse errors correctly" in {
-      val result = ZStream("(b)": _*) >>> matcher(parens0)
-      run(result.runCollect) mustEqual Seq(ParseIncomplete, ParseFailure("expected '(', got 'b' and(2) expected ')', got 'b'"), ParseFailure("expected '(', got ')'"), ParseEnded)
+      parseEvents(parens0)("(b)") mustEqual Seq(ParseIncomplete, ParseFailure("expected '(', got 'b' and(2) expected ')', got 'b'"), ParseFailure("expected '(', got ')'"), ParseEnded)
     }
 
-
-
-    "parse single A" in {
-      val result = ZStream("A": _*) >>> matcher(letterA)
-
-      run(result.runCollect) mustEqual Seq(ParseSuccess('A'), ParseEnded)
+    "parse B expecting A" in {
+      parseEvents(letterA)("B") mustEqual Seq(ParseFailure("expected 'A', got 'B'"), ParseEnded)
     }
-//
-//    "parse B expecting A" in {
-//      val result = ZStream("B": _*) >>> matcher(letterA)
-//
-//      run(result.runCollect) mustEqual Seq(ParseFailure("expected 'A', got 'B'"), ParseEnded)
-//    }
-//
-//    "parse single A or B" in {
-//      val result = ZStream("A": _*) >>> matcher(letterAorB)
-//
-//      run(result.runCollect) mustEqual Seq(ParseSuccess('A'), ParseEnded)
-//    }
-//
-//    "parse single B or A" in {
-//      val result = ZStream("B": _*) >>> matcher(letterAorB)
-//
-//      run(result.runCollect) mustEqual Seq(ParseSuccess('B'), ParseEnded)
-//    }
-//
-//    "parse single A of AB" in {
-//      val result = ZStream("AB": _*) >>> matcher(AB)
-//
-//      run(result.runCollect) mustEqual Seq(ParseIncomplete, ParseSuccess("AB"), ParseEnded)
-//    }
-//
-//    "parse ticks" in {
-//      println("parse ticks ----- start")
-//      val result = ZStream(Tick(1,0), Tick(2,1), Tick(4, 2)) >>> matcher(increasing)
-//
-//      run(result.runCollect) mustEqual Seq(ParseIncomplete, ParseIncomplete, ParseSuccess(1), ParseEnded)
-//    }
-//
-//    "parse ticks 2" in {
-//      val result = ZStream(Tick(5,0), Tick(2,1), Tick(4, 2), Tick(6, 2)) >>> matcher(increasing)
-//
-//      run(result.runCollect) mustEqual Seq(ParseIncomplete, ParseIncomplete, ParseSuccess(0), ParseIncomplete, ParseEnded)
-//    }
 
-    //
-//    "parse individual single parens" in {
-//      val result = ZStream("()()": _*) >>> matcher(parens)
-//
-//      run(result.runCollect) mustEqual List(ParseIncomplete, ParseSuccess(1), ParseIncomplete, ParseSuccess(1), ParseEnded)
-//    }
+    "parse single A or B" in {
+      parseEvents(AorB)("A") mustEqual Seq(ParseSuccess('A'), ParseEnded)
+      parseEvents(AorB)("B") mustEqual Seq(ParseSuccess('B'), ParseEnded)
+    }
 
-//    "parse multiple parens" in {
-//      val result = Process("()()()()()()()()()()()()()": _*).toSource pipe parse(parens) stripW
-//
-//      result.runLog.run mustEqual Seq(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0)
-//    }
-//
-//    "parse parens nested at arbitrary depth in sequence" in {
-//      val result = Process("((()))(())()((((()))))((()))()(((())))": _*).toSource pipe parse(parens) stripW
-//
-//      result.runLog.run mustEqual Seq(3, 2, 1, 5, 3, 1, 4, 0)
-//    }
+    "parse A then B" in {
+      parseEvents(AB)("AB") mustEqual Seq(ParseIncomplete, ParseSuccess("AB"), ParseEnded)
+    }
+
   }
 }

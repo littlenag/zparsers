@@ -52,7 +52,8 @@ libraryDependencies ++= Seq(
   "io.monix"           %% "monix-eval"    % "3.2.1",
   "io.monix"           %% "monix-tail"    % "3.2.1",
 
-  "org.specs2"         %% "specs2-core"   % "4.9.3" % "test",
+  "org.specs2"         %% "specs2-core"   % "4.9.3" % Test,
+  "org.scalatest"      %% "scalatest"     % "3.1.1" % Test
 )
 
 scalacOptions in Test ++= Seq("-Yrangepos")
