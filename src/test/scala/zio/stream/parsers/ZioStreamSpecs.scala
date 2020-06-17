@@ -33,7 +33,7 @@ class ZioStreamSpecs extends wordspec.AnyWordSpec {
   def run[E, A](zio: => ZIO[ZEnv, E, A]): A = Runtime.default.unsafeRun(zio)
 
   def parseEvents[T:Show,R](parser: Parser[T,R])(events: Seq[T]) = {
-    run((ZStream(events:_*) >>> matcher(parser)).runCollect)
+    run((ZStream(events:_*) >>> matchTumblingToEvents(parser)).runCollect)
   }
 
   val letterA: Parser[Char, Char] = 'A'
