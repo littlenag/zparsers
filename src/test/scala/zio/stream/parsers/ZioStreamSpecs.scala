@@ -44,6 +44,8 @@ class ZioStreamSpecs extends wordspec.AnyWordSpec {
 
   val AB: Parser[Char, String] = letterA ~ letterB ^^ { (_,_) => "AB" }
 
+  val AA = (letterA ~ letterA) ^^ ((_,_) => 1)
+
   lazy val parens: Parser[Char, Int] = (
     ('(' ~> parens) <~ ')' ^^ (1 +)
       | completed(0)
@@ -67,11 +69,14 @@ class ZioStreamSpecs extends wordspec.AnyWordSpec {
       } ^^ ((a,b,c) => if (c > b && b > a) 1 else 0 )
     )
 
-  "parentheses stream parsing" should {
+  "character stream parsing" should {
 
     "parse single a" in {
-      val aa = (letterA ~ letterA) ^^ ((_,_) => 1)
-      parseEvents(aa)("AA") mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
+      parseEvents(AA)("AA") mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
+    }
+
+    "parse one A expecting two" in {
+      parseEvents(AA)("A") mustEqual Seq(ParseIncomplete, ParseEnded)
     }
 
     "parse parens" in {
@@ -79,12 +84,7 @@ class ZioStreamSpecs extends wordspec.AnyWordSpec {
       parseEvents(parens)("(((())))").takeRight(3) mustEqual Seq(ParseIncomplete, ParseSuccess(4), ParseEnded)
     }
 
-    "parse one C expecting two" in {
-      val letterCMapped: Parser[Char, Int] = ('C' ~ 'C') ^^ ((_,_) => 2)
-      parseEvents(letterCMapped)("C") mustEqual Seq(ParseIncomplete, ParseEnded)
-    }
-
-    "parse errors correctly" in {
+    "parse unexpected characters correctly" in {
       parseEvents(parens0)("(b)") mustEqual Seq(ParseIncomplete, ParseFailure("expected '(', got 'b' and(2) expected ')', got 'b'"), ParseFailure("expected '(', got ')'"), ParseEnded)
     }
 
@@ -100,6 +100,5 @@ class ZioStreamSpecs extends wordspec.AnyWordSpec {
     "parse A then B" in {
       parseEvents(AB)("AB") mustEqual Seq(ParseIncomplete, ParseSuccess("AB"), ParseEnded)
     }
-
   }
 }
