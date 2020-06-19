@@ -31,11 +31,14 @@ object Matcher {
       matchTumbling
    */
 
-  def filterSuccesses[Result] = ZTransducer.fold[ParseResult[Result], Option[Result]](Option.empty[Result])(
-    _.isDefined) {
-    case (_,ParseSuccess(value)) => Option(value)
-    case (_,_) => None
-  }.map(_.get)
+  def filterSuccesses[Result] = ZTransducer
+    .identity[ParseResult[Result]]
+    .filter {
+      case ParseSuccess(_) => true
+      case _ => false
+    }.map {
+      case ParseSuccess(value) => value
+    }
 
   def matchCut[Event: Show, Result](parser: Parser[Event, Result]): ZTransducer[Any, Nothing, Event, Result] = {
     matchCutToEvents(parser) >>> filterSuccesses[Result]

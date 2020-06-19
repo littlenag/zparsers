@@ -16,6 +16,7 @@
 
 package zio.stream.parsers
 
+import Matcher._
 import cats._
 import cats.implicits._
 import zio._
@@ -32,8 +33,12 @@ class ZioStreamSpecs extends wordspec.AnyWordSpec {
 
   def run[E, A](zio: => ZIO[ZEnv, E, A]): A = Runtime.default.unsafeRun(zio)
 
-  def parseEvents[T:Show,R](parser: Parser[T,R])(events: Seq[T]) = {
-    run((ZStream(events:_*) >>> matchTumblingToEvents(parser)).runCollect)
+  def parseToEvents[T:Show,R](parser: Parser[T,R])(events: Seq[T]) = {
+    run((ZStream(events:_*) >>> Matcher.matchCutToEvents(parser)).runCollect)
+  }
+
+  def parseSuccess[T:Show,R](parser: Parser[T,R])(events: Seq[T]) = {
+    run((ZStream(events:_*) >>> Matcher.matchCut(parser)).runCollect)
   }
 
   val letterA: Parser[Char, Char] = 'A'
@@ -69,36 +74,42 @@ class ZioStreamSpecs extends wordspec.AnyWordSpec {
       } ^^ ((a,b,c) => if (c > b && b > a) 1 else 0 )
     )
 
+  "character stream parse simple" should {
+    "parse a" in {
+      parseSuccess(AA)("AA") mustEqual Seq(1)
+    }
+  }
+
   "character stream parsing" should {
 
     "parse single a" in {
-      parseEvents(AA)("AA") mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
+      parseToEvents(AA)("AA") mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
     }
 
     "parse one A expecting two" in {
-      parseEvents(AA)("A") mustEqual Seq(ParseIncomplete, ParseEnded)
+      parseToEvents(AA)("A") mustEqual Seq(ParseIncomplete, ParseEnded)
     }
 
     "parse parens" in {
-      parseEvents(parens)("()") mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
-      parseEvents(parens)("(((())))").takeRight(3) mustEqual Seq(ParseIncomplete, ParseSuccess(4), ParseEnded)
+      parseToEvents(parens)("()") mustEqual Seq(ParseIncomplete, ParseSuccess(1), ParseEnded)
+      parseToEvents(parens)("(((())))").takeRight(3) mustEqual Seq(ParseIncomplete, ParseSuccess(4), ParseEnded)
     }
 
     "parse unexpected characters correctly" in {
-      parseEvents(parens0)("(b)") mustEqual Seq(ParseIncomplete, ParseFailure("expected '(', got 'b' and(2) expected ')', got 'b'"), ParseFailure("expected '(', got ')'"), ParseEnded)
+      parseToEvents(parens0)("(b)") mustEqual Seq(ParseIncomplete, ParseFailure("expected '(', got 'b' and(2) expected ')', got 'b'"), ParseFailure("expected '(', got ')'"), ParseEnded)
     }
 
     "parse B expecting A" in {
-      parseEvents(letterA)("B") mustEqual Seq(ParseFailure("expected 'A', got 'B'"), ParseEnded)
+      parseToEvents(letterA)("B") mustEqual Seq(ParseFailure("expected 'A', got 'B'"), ParseEnded)
     }
 
     "parse single A or B" in {
-      parseEvents(AorB)("A") mustEqual Seq(ParseSuccess('A'), ParseEnded)
-      parseEvents(AorB)("B") mustEqual Seq(ParseSuccess('B'), ParseEnded)
+      parseToEvents(AorB)("A") mustEqual Seq(ParseSuccess('A'), ParseEnded)
+      parseToEvents(AorB)("B") mustEqual Seq(ParseSuccess('B'), ParseEnded)
     }
 
     "parse A then B" in {
-      parseEvents(AB)("AB") mustEqual Seq(ParseIncomplete, ParseSuccess("AB"), ParseEnded)
+      parseToEvents(AB)("AB") mustEqual Seq(ParseIncomplete, ParseSuccess("AB"), ParseEnded)
     }
   }
 }

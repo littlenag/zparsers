@@ -62,7 +62,7 @@ import Syntax._
  * make the encoding somewhat convoluted in a few places from an implementation standpoint.  Hopefully
  * those convolutions do not leak into user space...
  */
-sealed trait Parser[Token, Result] {
+sealed trait Parser[EventIn, Result] {
 
   /**
    * Attempts to complete the parser, under the assumption that the stream has terminated. If the
@@ -81,13 +81,13 @@ sealed trait Parser[Token, Result] {
    * which will produce an `Error("divergent")` for all non-trivial parsers (namely, parsers that
    * are not `Complete` or `Error` already).
    */
-  def complete[R](seen: Set[Parser[Token, _]] = Set()): Either[Parser.Error[Token, R], Parser.Completed[Token, Result]]
+  def complete[R](seen: Set[Parser[EventIn, _]] = Set()): Either[Parser.Error[EventIn, R], Parser.Completed[EventIn, Result]]
 
   /**
    * Parsers are functors, how 'bout that?  Note the lack of flatMap, though.  No context-sensitive
    * parsers allowed.
    */
-  def map[Result2](f: Result => Result2): Parser[Token, Result2]
+  def map[Result2](f: Result => Result2): Parser[EventIn, Result2]
 }
 
 object Parser {
