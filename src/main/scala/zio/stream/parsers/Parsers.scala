@@ -19,107 +19,113 @@ object Syntax {
 
 import Syntax._
 
-/**
- * Applicative (not monadic!) parser interface defined by two functions (simplified types):
- *
- * - `complete: Error \/ Completed`
- * - `derive: State[Cache, Parser]`
- *
- * The `derive` function is only defined on parsers of the subtype, `Incomplete`.  The `complete`
- * function is defined on all parsers, where the following axioms hold:
- *
- * - `complete Completed = \/-(Completed)`
- * - `complete Error = -\/(Error)`
- * - `complete Incomplete = ???`
- *
- * Which is to say that an "Incomplete" parser may be completable, but is also guaranteed to have
- * potential subsequent derivations.  A "Complete" or "Error" parser do not have any further
- * derivations, but their completeness is guaranteed.  An example of an incomplete parser that has
- * subsequent possible derivations but is still completeable is the following:
- *
- * lazy val parens = (
- *     '(' ~ parens ~ ')'
- *   | completed
- * )
- *
- * The `parens` parser may be completed immediately, since it contains a production for the empty
- * string.  However, it may also be derived, and the only valid derivation for it is over the '('
- * token.  The resulting parser from that derivation *cannot* be completed, since it would require
- * a matching paren in order to represent a valid input.
- *
- * A parser which starts as Incomplete and then becomes either Completed or Error might be something
- * like the following:
- *
- * lazy val foo = literal('a')
- *
- * The `foo` parser is Incomplete and not completable (it contains no production for the empty string).
- * However, it may be derived over the token 'a' to produce a Completed parser (which will actually
- * be of runtime type Completed).  If it is derived over any other token, it will produce an Error
- * parser.
- *
- * Thus, unlike many parser combinators encodings, this one encodes the result algebra directly in
- * the parser itself.  This has several advantages from a usability standpoint.  It does, however,
- * make the encoding somewhat convoluted in a few places from an implementation standpoint.  Hopefully
- * those convolutions do not leak into user space...
- */
-sealed trait Parser[EventIn, Result] {
+trait Parsers {
+  // Type of events are we are parsing on
+  type EventIn
+
+  // Types of events we'll emit on partial matches
+  type EventOut
 
   /**
-   * Attempts to complete the parser, under the assumption that the stream has terminated. If the
-   * parser contains a production for the empty string, it will complete and produce its result.
-   * Otherwise, if no ε-production exists, an error will be produced.
+   * Applicative (not monadic!) parser interface defined by two functions (simplified types):
    *
-   * This function allows evaluators to request early termination on a possibly-unbounded incremental
-   * parse.  For example, one might define a JSON grammar which parses an unbounded number of JSON
-   * values, returning them as a list.  Such a grammar could complete early so long as the prefix
-   * string of tokens defines a complete and self-contained JSON value.  This is a desirable property
-   * for stream parsers, as it allows the evaluation to be driven (and halted) externally.
+   * - `complete: Error \/ Completed`
+   * - `derive: State[Cache, Parser]`
    *
-   * Any parsers specified in the `seen` set will be treated as already traversed, indicating a cycle
-   * in the graph.  Thus, if the traversal recursively reaches these parsers, that node will complete
-   * to an error.  For a good time with the whole family, you can invoke `prsr.complete(Set(prsr))`,
-   * which will produce an `Error("divergent")` for all non-trivial parsers (namely, parsers that
-   * are not `Complete` or `Error` already).
+   * The `derive` function is only defined on parsers of the subtype, `Incomplete`.  The `complete`
+   * function is defined on all parsers, where the following axioms hold:
+   *
+   * - `complete Completed = \/-(Completed)`
+   * - `complete Error = -\/(Error)`
+   * - `complete Incomplete = ???`
+   *
+   * Which is to say that an "Incomplete" parser may be completable, but is also guaranteed to have
+   * potential subsequent derivations.  A "Complete" or "Error" parser do not have any further
+   * derivations, but their completeness is guaranteed.  An example of an incomplete parser that has
+   * subsequent possible derivations but is still completeable is the following:
+   *
+   * lazy val parens = (
+   * '(' ~ parens ~ ')'
+   * | completed
+   * )
+   *
+   * The `parens` parser may be completed immediately, since it contains a production for the empty
+   * string.  However, it may also be derived, and the only valid derivation for it is over the '('
+   * token.  The resulting parser from that derivation *cannot* be completed, since it would require
+   * a matching paren in order to represent a valid input.
+   *
+   * A parser which starts as Incomplete and then becomes either Completed or Error might be something
+   * like the following:
+   *
+   * lazy val foo = literal('a')
+   *
+   * The `foo` parser is Incomplete and not completable (it contains no production for the empty string).
+   * However, it may be derived over the token 'a' to produce a Completed parser (which will actually
+   * be of runtime type Completed).  If it is derived over any other token, it will produce an Error
+   * parser.
+   *
+   * Thus, unlike many parser combinators encodings, this one encodes the result algebra directly in
+   * the parser itself.  This has several advantages from a usability standpoint.  It does, however,
+   * make the encoding somewhat convoluted in a few places from an implementation standpoint.  Hopefully
+   * those convolutions do not leak into user space...
    */
-  def complete[R](seen: Set[Parser[EventIn, _]] = Set()): Either[Parser.Error[EventIn, R], Parser.Completed[EventIn, Result]]
+  sealed trait Parser[T] {
 
-  /**
-   * Parsers are functors, how 'bout that?  Note the lack of flatMap, though.  No context-sensitive
-   * parsers allowed.
-   */
-  def map[Result2](f: Result => Result2): Parser[EventIn, Result2]
-}
+    /**
+     * Attempts to complete the parser, under the assumption that the stream has terminated. If the
+     * parser contains a production for the empty string, it will complete and produce its result.
+     * Otherwise, if no ε-production exists, an error will be produced.
+     *
+     * This function allows evaluators to request early termination on a possibly-unbounded incremental
+     * parse.  For example, one might define a JSON grammar which parses an unbounded number of JSON
+     * values, returning them as a list.  Such a grammar could complete early so long as the prefix
+     * string of tokens defines a complete and self-contained JSON value.  This is a desirable property
+     * for stream parsers, as it allows the evaluation to be driven (and halted) externally.
+     *
+     * Any parsers specified in the `seen` set will be treated as already traversed, indicating a cycle
+     * in the graph.  Thus, if the traversal recursively reaches these parsers, that node will complete
+     * to an error.  For a good time with the whole family, you can invoke `prsr.complete(Set(prsr))`,
+     * which will produce an `Error("divergent")` for all non-trivial parsers (namely, parsers that
+     * are not `Complete` or `Error` already).
+     */
+    def complete[R](seen: Set[Parser[_]] = Set()): Either[Error[R], Completed[T]]
 
-object Parser {
+    /**
+     * Parsers are functors, how 'bout that?  Note the lack of flatMap, though.  No context-sensitive
+     * parsers allowed.
+     */
+    def map[U](f: T => U): Parser[U]
+  }
 
   // yep, indexing on value identity LIKE A BOSS
-  type Cache[Token] = KMap[({ type λ[α] = (Token, Parser[Token, α]) })#λ, ({ type λ[α] = () => Parser[Token, α] })#λ]
+  type Cache = KMap[Lambda[α => (EventIn, Parser[α])], Lambda[α => () => Parser[α]]]
+  //type Cache = KMap[({type λ[α] = (EventIn, Parser[α])})#λ, ({type λ[α] = () => Parser[α]})#λ]
 
   // creates an empty cache
-  def Cache[Token] = KMap[({ type λ[α] = (Token, Parser[Token, α]) })#λ, ({ type λ[α] = () => Parser[Token, α] })#λ]()
+  def Cache = KMap[({type λ[α] = (EventIn, Parser[α])})#λ, ({type λ[α] = () => Parser[α]})#λ]()
 
   /**
    * Parser for the empty string, producing a given result.
    */
-  def completed[Token, Result](r: Result): Parser[Token, Result] = Completed(r)
+  def completed[Result](r: Result): Parser[Result] = Completed(r)
 
   /**
    * Parser that is already in the error state.  Generally speaking, this is probably
    * only useful for internal plumbing.
    */
-  def error[Token, Result](msg: String): Parser[Token, Result] = Error(msg)
+  def error[Result](msg: String): Parser[Result] = Error(msg)
 
   /**
    * Parser for a single literal token, producing that token as a result.  Parametricity!
    */
-  implicit def literal[Token: Eq: Show](token: Token): Parser[Token, Token] = new Incomplete[Token, Token] {
+  implicit def literal(token: EventIn)(implicit ev1: Eq[EventIn], ev2: Show[EventIn]): Parser[EventIn] = new Incomplete[EventIn] {
 
     override val toString: String = s"lit(${token.show})"
 
-    def innerComplete[R](seen: Set[Parser[Token, _]]) = Left(Error(s"unexpected end of stream; expected '${token.show}'"))
+    def innerComplete[R](seen: Set[Parser[_]]) = Left(Error(s"unexpected end of stream; expected '${token.show}'"))
 
-    def innerDerive(candidate: Token): State[Cache[Token], Parser[Token, Token]] = {
-      val result: Parser[Token, Token] =
+    def innerDerive(candidate: EventIn): State[Cache, Parser[EventIn]] = {
+      val result: Parser[EventIn] =
         if (candidate === token)
           completed(token)
         else
@@ -129,14 +135,14 @@ object Parser {
     }
   }
 
-  def pattern[Token: Show, Result](pf: PartialFunction[Token, Result]): Parser[Token, Result] = new Incomplete[Token, Result] {
+  def pattern[T](pf: PartialFunction[EventIn, T])(implicit ev2: Show[EventIn]): Parser[T] = new Incomplete[T] {
 
     override val toString: String = s"pattern(...)"
 
-    def innerComplete[R](seen: Set[Parser[Token, _]]) = Left(Error(s"unexpected end of stream"))
+    def innerComplete[R](seen: Set[Parser[_]]) = Left(Error(s"unexpected end of stream"))
 
-    def innerDerive(candidate: Token) = {
-      val result: Parser[Token, Result] = if (pf isDefinedAt candidate)
+    def innerDerive(candidate: EventIn) = {
+      val result: Parser[T] = if (pf isDefinedAt candidate)
         completed(pf(candidate))
       else
         error(s"'${candidate.show}' did not match the expected pattern")
@@ -150,84 +156,84 @@ object Parser {
   //
 
   // implicit chaining for literal syntax
-  implicit def literalRichParser[Token: Eq: Show](token: Token): RichParser[Token, Token] =
+  implicit def literalRichParser(token: EventIn)(implicit ev1: Eq[EventIn], ev2: Show[EventIn]): RichParser[EventIn] =
     new RichParser(literal(token))
 
   // it's somewhat important that these functions be lazy
-  implicit class RichParser[Token, Result](left: => Parser[Token, Result]) {
+  implicit class RichParser[Result](left: => Parser[Result]) {
 
-    def as[Result2](f: => Result2): Parser[Token, Result2] = left map (_ => f)
+    def as[Result2](f: => Result2): Parser[Result2] = left map (_ => f)
 
     // alias for map
-    def ^^[Result2](f: Result => Result2): Parser[Token, Result2] = left map f
+    def ^^[Result2](f: Result => Result2): Parser[Result2] = left map f
 
-    def ~>[Result2](right: => Parser[Token, Result2]): Parser[Token, Result2] =
+    def ~>[Result2](right: => Parser[Result2]): Parser[Result2] =
       left ~ right ^^ { (_, r) => r }
 
-    def <~[Result2](right: => Parser[Token, Result2]): Parser[Token, Result] =
+    def <~[Result2](right: => Parser[Result2]): Parser[Result] =
       left ~ right ^^ { (l, _) => l }
 
     // alias for andThen
-    def ~[Result2](right: => Parser[Token, Result2]) = andThen(right)
+    def ~[Result2](right: => Parser[Result2]) = andThen(right)
 
-    def andThen[Result2](right: => Parser[Token, Result2]): Parser[Token, Result ~ Result2] = {
+    def andThen[Result2](right: => Parser[Result2]): Parser[Result ~ Result2] = {
       new SeqParser(left, right)
     }
 
     // alias for orElse
-    def |(right: => Parser[Token, Result]) = {
+    def |(right: => Parser[Result]) = {
       orElse(right)
     }
 
-    def orElse(right: => Parser[Token, Result]): Parser[Token, Result] =
+    def orElse(right: => Parser[Result]): Parser[Result] =
       new UnionParser(left, right)
   }
 
-  implicit class Caret2[Token, A, B](self: Parser[Token, A ~ B]) {
+  implicit class Caret2[A, B](self: Parser[A ~ B]) {
 
-    def ^^[Z](f: (A, B) => Z): Parser[Token, Z] = self map {
+    def ^^[Z](f: (A, B) => Z): Parser[Z] = self map {
       case a ~ b => f(a, b)
     }
   }
 
-  implicit class Caret3L[Token, A, B, C](self: Parser[Token, (A ~ B) ~ C]) {
+  implicit class Caret3L[A, B, C](self: Parser[(A ~ B) ~ C]) {
 
-    def ^^[Z](f: (A, B, C) => Z): Parser[Token, Z] = self map {
+    def ^^[Z](f: (A, B, C) => Z): Parser[Z] = self map {
       case (a ~ b) ~ c => f(a, b, c)
     }
   }
 
-  implicit class Caret3R[Token, A, B, C](self: Parser[Token, A ~ (B ~ C)]) {
+  implicit class Caret3R[A, B, C](self: Parser[A ~ (B ~ C)]) {
 
-    def ^^[Z](f: (A, B, C) => Z): Parser[Token, Z] = self map {
+    def ^^[Z](f: (A, B, C) => Z): Parser[Z] = self map {
       case a ~ (b ~ c) => f(a, b, c)
     }
   }
 
-  implicit class Caret4LL[Token, A, B, C, D](self: Parser[Token, ((A ~ B) ~ C) ~ D]) {
+  implicit class Caret4LL[A, B, C, D](self: Parser[((A ~ B) ~ C) ~ D]) {
 
-    def ^^[Z](f: (A, B, C, D) => Z): Parser[Token, Z] = self map {
+    def ^^[Z](f: (A, B, C, D) => Z): Parser[Z] = self map {
       case ((a ~ b) ~ c) ~ d => f(a, b, c, d)
     }
   }
 
-  implicit class Caret4LR[Token, A, B, C, D](self: Parser[Token, (A ~ (B ~ C)) ~ D]) {
+  implicit class Caret4LR[A, B, C, D](self: Parser[(A ~ (B ~ C)) ~ D]) {
 
-    def ^^[Z](f: (A, B, C, D) => Z): Parser[Token, Z] = self map {
+    def ^^[Z](f: (A, B, C, D) => Z): Parser[Z] = self map {
       case (a ~ (b ~ c)) ~ d => f(a, b, c, d)
     }
   }
 
-  implicit class Caret4RL[Token, A, B, C, D](self: Parser[Token, A ~ ((B ~ C) ~ D)]) {
+  implicit class Caret4RL[A, B, C, D](self: Parser[A ~ ((B ~ C) ~ D)]) {
 
-    def ^^[Z](f: (A, B, C, D) => Z): Parser[Token, Z] = self map {
+    def ^^[Z](f: (A, B, C, D) => Z): Parser[Z] = self map {
       case a ~ ((b ~ c) ~ d) => f(a, b, c, d)
     }
   }
 
-  implicit class Caret4RR[Token, A, B, C, D](self: Parser[Token, A ~ (B ~ (C ~ D))]) {
+  implicit class Caret4RR[A, B, C, D](self: Parser[A ~ (B ~ (C ~ D))]) {
 
-    def ^^[Z](f: (A, B, C, D) => Z): Parser[Token, Z] = self map {
+    def ^^[Z](f: (A, B, C, D) => Z): Parser[Z] = self map {
       case a ~ (b ~ (c ~ d)) => f(a, b, c, d)
     }
   }
@@ -237,25 +243,25 @@ object Parser {
   //
 
   // note that this is *not* a NEL; we're going to forbid global ambiguity for now
-  final case class Completed[Token, Result](result: Result) extends Parser[Token, Result] {
-    def complete[R](seen: Set[Parser[Token, _]]) = \/-(this)
+  final case class Completed[T](result: T) extends Parser[T] {
+    def complete[R](seen: Set[Parser[_]]) = \/-(this)
 
-    def map[Result2](f: Result => Result2): Completed[Token, Result2] = Completed(f(result))
+    def map[U](f: T => U): Completed[U] = Completed(f(result))
   }
 
   // yep!  it's a string.  deal with it
-  final case class Error[Token, Result](msg: String) extends Parser[Token, Result] {
-    def complete[R](seen: Set[Parser[Token, _]]) = Left(Error(msg))
+  final case class Error[T](msg: String) extends Parser[T] {
+    def complete[R](seen: Set[Parser[_]]) = Left(Error(msg))
 
-    def map[Result2](f: Result => Result2): Error[Token, Result2] = Error(msg)
+    def map[U](f: T => U): Error[U] = Error(msg)
   }
 
   object Error {
-    implicit def monoid[Token, Result]: Monoid[Error[Token, Result]] = new Monoid[Error[Token, Result]] {
+    implicit def monoid[T]: Monoid[Error[T]] = new Monoid[Error[T]] {
 
       def empty = Error("")
 
-      def combine(e1: Error[Token, Result], e2: Error[Token, Result]): Error[Token, Result] =
+      def combine(e1: Error[T], e2: Error[T]): Error[T] =
         Error(s"${e1.msg} and(0) ${e2.msg}")
     }
   }
@@ -264,14 +270,15 @@ object Parser {
   // again with the co-routine like parsing structure
   // could be made more performant by using special control flow structures that a quoted DSL could parse out
   // co-routine makes passing state easier, since otherwise would have to thread through the parser combinator constructors
-  sealed trait Incomplete[Token, Result] extends Parser[Token, Result] { outer =>
+  sealed trait Incomplete[Result] extends Parser[Result] {
+    outer =>
 
-    def map[Result2](f: Result => Result2): Parser[Token, Result2] = new Incomplete[Token, Result2] {
+    def map[Result2](f: Result => Result2): Parser[Result2] = new Incomplete[Result2] {
 
-      override def innerComplete[R](seen: Set[Parser[Token, _]]) =
+      override def innerComplete[R](seen: Set[Parser[_]]) =
         outer.complete[R](seen).bimap(identity, _ map f)
 
-      override def innerDerive(candidate: Token): State[Cache[Token], Parser[Token, Result2]] = {
+      override def innerDerive(candidate: EventIn): State[Cache, Parser[Result2]] = {
         val x = outer innerDerive candidate
         x map { p => p.map(f) }
       }
@@ -281,7 +288,7 @@ object Parser {
 
     override def toString: String = "Incomplete"
 
-    final def complete[R](seen: Set[Parser[Token, _]]): Either[Error[Token, R], Completed[Token, Result]] = {
+    final def complete[R](seen: Set[Parser[_]]): Either[Error[R], Completed[Result]] = {
       // as a side note, this comparison being on pointer identity is the reason this algorithm is O(k^n)
       // if we could magically compare parsers on equivalence of the language they generate, the algorithm
       // would be O(n^2), even if I reenabled global ambiguity support.  SO CLOSE!
@@ -291,7 +298,7 @@ object Parser {
         innerComplete[R](seen + this)
     }
 
-    protected def innerComplete[R](seen: Set[Parser[Token, _]]): Either[Error[Token, R], Completed[Token, Result]]
+    protected def innerComplete[R](seen: Set[Parser[_]]): Either[Error[R], Completed[Result]]
 
     /**
      * Progresses the parse over a single token and returns the continuation (as a parser).  Note that
@@ -310,149 +317,155 @@ object Parser {
      * to advance over subsequent tokens, but cannot be completed then-and-there (attempting to do
      * so would result in an Error).
      */
-    final def derive(t: Token): State[Cache[Token], Parser[Token, Result]] = {
+    final def derive(t: EventIn): State[Cache, Parser[Result]] = {
       for {
-        cache <- State.get[Cache[Token]]
+        cache <- State.get[Cache]
         derived <- cache get (t -> this) map { thunk =>
           val t = thunk()
           println(s"--in cache: $t")
-          State.pure[Cache[Token], Parser[Token, Result]](t)
+          State.pure[Cache, Parser[Result]](t)
         } getOrElse {
           for {
             _ <- State.pure(println(s"--not in cache"))
             derived <- innerDerive(t)
             _ <- State.pure(println(s"--after inner derive: $derived"))
 
-            cache2 <- State.get[Cache[Token]]
+            cache2 <- State.get[Cache]
             _ <- State set (cache2 + ((t, this) -> { () => derived }))
           } yield derived
         }
       } yield derived
     }
 
-    protected def innerDerive(candidate: Token): State[Cache[Token], Parser[Token, Result]]
+    protected def innerDerive(candidate: EventIn): State[Cache, Parser[Result]]
   }
 
   //
   // typeclasses
   //
 
-  implicit def parserInstance[T]: Applicative[Parser[T, *]] = new Applicative[Parser[T, *]] {
+  implicit val parserInstance: Applicative[Parser[*]] = new Applicative[Parser[*]] {
 
-    def pure[A](a: A): Parser[T, A] = completed(a)
+    def pure[A](a: A): Parser[A] = completed(a)
 
-    def ap[A, B](f: Parser[T, A => B])(fa: Parser[T, A]): Parser[T, B] =
+    def ap[A, B](f: Parser[A => B])(fa: Parser[A]): Parser[B] =
       fa ~ f ^^ { (a, f) => f(a) }
   }
-}
 
-private[parsers] class SeqParser[Token, LR, RR](_left: => Parser[Token, LR], _right: => Parser[Token, RR]) extends Parser.Incomplete[Token, LR ~ RR] {
-  import Parser._
 
-  private lazy val left = _left
-  private lazy val right = _right
+  class SeqParser[LR, RR](_left: => Parser[LR], _right: => Parser[RR]) extends Incomplete[LR ~ RR] {
 
-  override lazy val toString: String = s"(${left}) ~ (${right})"
+    private lazy val left = _left
+    private lazy val right = _right
 
-  def innerComplete[R](seen: Set[Parser[Token, _]]): Error[Token, R] \/ Completed[Token, LR ~ RR] = for {
-    clr <- left.complete[R](seen)
-    crr <- right.complete[R](seen)
-  } yield Completed((clr.result, crr.result))
+    override lazy val toString: String = s"(${left}) ~ (${right})"
 
-  def innerDerive(t: Token): State[Cache[Token], Parser[Token, LR ~ RR]] = {
-    println(s"---seq inner derive. l=$left, r=$right")
+    def innerComplete[R](seen: Set[Parser[_]]): Error[R] \/ Completed[LR ~ RR] = for {
+      clr <- left.complete[R](seen)
+      crr <- right.complete[R](seen)
+    } yield Completed((clr.result, crr.result))
 
-    (left, right) match {
-      // deriving after completing is an error
-      case (Completed(_), Completed(_)) | (Completed(_), Error(_)) => State.pure(Error("unexpected end of stream"))
+    def innerDerive(t: EventIn): State[Cache, Parser[LR ~ RR]] = {
+      println(s"---seq inner derive. l=$left, r=$right")
 
-      case (Error(msg), _) => State.pure(Error(msg))
-      case (_, Error(msg)) => State.pure(Error(msg))
+      (left, right) match {
+        // deriving after completing is an error
+        case (Completed(_), Completed(_)) | (Completed(_), Error(_)) => State.pure(Error("unexpected end of stream"))
 
-      case (Completed(lr), right: Incomplete[Token, RR]) => for {
-        rp <- right derive t
-      } yield rp map { (lr, _) } // fails fast?
+        case (Error(msg), _) => State.pure(Error(msg))
+        case (_, Error(msg)) => State.pure(Error(msg))
 
-      case (left: Incomplete[Token, LR], right: Incomplete[Token, RR]) => {
-        left.complete(Set()).toOption.map {
-          case Completed(lr) => {
-            for {
-              lp <- left derive t
-              rp <- right derive t
-            } yield {
-              //val x = lp ~ right | (rp map { (lr, _) })
-              (lp, rp) match {
-                case (Error(msg1), Error(msg2)) => Error[Token, LR ~ RR](s"$msg1 and(2) $msg2")
-                case (Error(_), _) => rp map { (lr, _) }
-                case (_, Error(_)) => lp ~ right
-                case (_,_) => lp ~ right | (rp map { (lr, _) })
+        case (Completed(lr), right: Incomplete[RR]) => for {
+          rp <- right derive t
+        } yield rp map {
+          (lr, _)
+        } // fails fast?
+
+        case (left: Incomplete[LR], right: Incomplete[RR]) => {
+          left.complete(Set()).toOption.map {
+            case Completed(lr) => {
+              for {
+                lp <- left derive t
+                rp <- right derive t
+              } yield {
+                //val x = lp ~ right | (rp map { (lr, _) })
+                (lp, rp) match {
+                  case (Error(msg1), Error(msg2)) => Error[LR ~ RR](s"$msg1 and(2) $msg2")
+                  case (Error(_), _) => rp map {
+                    (lr, _)
+                  }
+                  case (_, Error(_)) => lp ~ right
+                  case (_, _) => lp ~ right | (rp map {
+                    (lr, _)
+                  })
+                }
               }
             }
-          }
-        } getOrElse {
-          for {
-            lp <- left derive t
-          } yield {
-            //lp ~ right
+          } getOrElse {
+            for {
+              lp <- left derive t
+            } yield {
+              //lp ~ right
 
-            lp match {
-              case Error(msg) => Error(msg)
-              case _ => lp ~ right
+              lp match {
+                case Error(msg) => Error(msg)
+                case _ => lp ~ right
+              }
             }
           }
         }
       }
     }
   }
-}
 
-private[parsers] class UnionParser[Token, Result](_left: => Parser[Token, Result], _right: => Parser[Token, Result]) extends Parser.Incomplete[Token, Result] {
-  import Parser._
+  class UnionParser[Result](_left: => Parser[Result], _right: => Parser[Result]) extends Incomplete[Result] {
 
-  private lazy val left = _left
-  private lazy val right = _right
+    private lazy val left = _left
+    private lazy val right = _right
 
-  override lazy val toString: String = s"(${left}) | (${right})"
+    override lazy val toString: String = s"(${left}) | (${right})"
 
-  def innerComplete[R](seen: Set[Parser[Token, _]]): Either[Error[Token, R], Completed[Token, Result]] = {
-    (left.complete[R](seen), right.complete[R](seen)) match {
-      case (Right(Completed(_)), Right(Completed(_))) => Either.left(Error("global ambiguity detected"))
-      case (lr @ Right(Completed(_)), Left(Error(_))) => lr
-      case (Left(Error(_)), rr @ Right(Completed(_))) => rr
-      case (Left(Error(msg)), Left(Error(msg2))) => {
-        if (msg == msg2)
-          Left(Error(msg))
-        else
-          Left(Error(s"$msg and(1) $msg2"))
+    def innerComplete[R](seen: Set[Parser[_]]): Either[Error[R], Completed[Result]] = {
+      (left.complete[R](seen), right.complete[R](seen)) match {
+        case (Right(Completed(_)), Right(Completed(_))) => Either.left(Error("global ambiguity detected"))
+        case (lr@Right(Completed(_)), Left(Error(_))) => lr
+        case (Left(Error(_)), rr@Right(Completed(_))) => rr
+        case (Left(Error(msg)), Left(Error(msg2))) => {
+          if (msg == msg2)
+            Left(Error(msg))
+          else
+            Left(Error(s"$msg and(1) $msg2"))
+        }
+      }
+    }
+
+    def innerDerive(t: EventIn): State[Cache, Parser[Result]] = (left, right) match {
+      case (Error(leftMsg), Error(rightMsg)) => State.pure(Error(s"$leftMsg -OR- $rightMsg"))
+
+      case (Error(_), Completed(_)) => State.pure(Error("unexpected end of stream"))
+      case (Completed(_), Error(_)) => State.pure(Error("unexpected end of stream"))
+      case (Completed(_), Completed(_)) => State.pure(Error("unexpected end of stream"))
+
+      case (Error(_) | Completed(_), right: Incomplete[Result]) => right derive t
+      case (left: Incomplete[Result], Error(_) | Completed(_)) => left derive t
+
+      case (left: Incomplete[Result], right: Incomplete[Result]) => State { cache =>
+        //lazy val xx = left derive t run cache2
+
+        lazy val (cache3, lp) = left derive t run cache2 value
+        lazy val (cache4, rp) = right derive t run cache3 value
+
+        lazy val back: Parser[Result] = lp | rp
+        lazy val cache2: Cache = cache + ((t, this) -> { () => back })
+
+        // Short circuit if both sides fail
+        (lp, rp) match {
+          case (Error(l), Error(r)) => (cache4, Error(s"$l -AND- $r"))
+          case (_, _) => (cache4, lp | rp)
+        }
+
       }
     }
   }
 
-  def innerDerive(t: Token): State[Cache[Token], Parser[Token, Result]] = (left, right) match {
-    case (Error(leftMsg), Error(rightMsg)) => State.pure(Error(s"$leftMsg -OR- $rightMsg"))
-
-    case (Error(_), Completed(_)) => State.pure(Error("unexpected end of stream"))
-    case (Completed(_), Error(_)) => State.pure(Error("unexpected end of stream"))
-    case (Completed(_), Completed(_)) => State.pure(Error("unexpected end of stream"))
-
-    case (Error(_) | Completed(_), right: Incomplete[Token, Result]) => right derive t
-    case (left: Incomplete[Token, Result], Error(_) | Completed(_)) => left derive t
-
-    case (left: Incomplete[Token, Result], right: Incomplete[Token, Result]) => State { cache =>
-      //lazy val xx = left derive t run cache2
-
-      lazy val (cache3, lp) = left derive t run cache2 value
-      lazy val (cache4, rp) = right derive t run cache3 value
-
-      lazy val back: Parser[Token, Result] = lp | rp
-      lazy val cache2: Cache[Token] = cache + ((t, this) -> { () => back })
-
-      // Short circuit if both sides fail
-      (lp, rp) match {
-        case (Error(l), Error(r)) => (cache4, Error(s"$l -AND- $r"))
-        case (_, _) => (cache4, lp | rp)
-      }
-
-    }
-  }
 }
