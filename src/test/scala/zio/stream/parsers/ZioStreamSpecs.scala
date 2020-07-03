@@ -16,7 +16,7 @@
 
 package zio.stream.parsers
 
-import Matcher._
+//import Matcher._
 import cats._
 import cats.implicits._
 import zio._
@@ -24,55 +24,67 @@ import zio.stream._
 import org.scalatest._
 import org.scalatest.matchers.must.Matchers._
 
-class ZioStreamSpecs extends wordspec.AnyWordSpec {
-  import Parser._
+object CharParsers extends Parsers with StreamMatchers {
+  override type EventIn = Char
 
-  case class Tick(v: Int, t: Int)
+  //implicit override val showEventIn: Show[EventIn] = catsStdShowForChar
 
-  implicit val showTick: Show[Tick] = Show.fromToString
+  val letterA: Parser[Char] = 'A'
 
-  def run[E, A](zio: => ZIO[ZEnv, E, A]): A = Runtime.default.unsafeRun(zio)
+  val letterB: Parser[Char] = 'B'
 
-  def parseToEvents[T:Show,R](parser: Parser[T,R])(events: Seq[T]) = {
-    run((ZStream(events:_*) >>> Matcher.matchCutToEvents(parser)).runCollect)
-  }
+  val AorB: Parser[Char] = letterA | letterB
 
-  def parseSuccess[T:Show,R](parser: Parser[T,R])(events: Seq[T]) = {
-    run((ZStream(events:_*) >>> Matcher.matchCut(parser)).runCollect)
-  }
+  val AB: Parser[String] = letterA ~ letterB ^^ { (_,_) => "AB" }
 
-  val letterA: Parser[Char, Char] = 'A'
+  val AA: Parser[Int] = (letterA ~ letterA) ^^ ((_, _) => 1)
 
-  val letterB: Parser[Char, Char] = 'B'
-
-  val AorB: Parser[Char, Char] = letterA | letterB
-
-  val AB: Parser[Char, String] = letterA ~ letterB ^^ { (_,_) => "AB" }
-
-  val AA = (letterA ~ letterA) ^^ ((_,_) => 1)
-
-  lazy val parens: Parser[Char, Int] = (
+  lazy val parens: Parser[Int] = (
     ('(' ~> parens) <~ ')' ^^ (1 +)
       | completed(0)
     )
 
-  lazy val parens0: Parser[Char, Int] = (
+  lazy val parens0: Parser[Int] = (
     (('(' ~> parens) <~ ')')
       | completed(0)
     )
 
+  def run[E, A](zio: => ZIO[ZEnv, E, A]): A = Runtime.default.unsafeRun(zio)
+
+  def parseToEvents[R](parser: Parser[R])(events: Seq[EventIn]): Seq[ParseResult[R]] = {
+    run((ZStream(events:_*) >>> matchCutToEvents(parser)).runCollect)
+  }
+
+  def parseSuccess[R](parser: Parser[R])(events: Seq[EventIn]): Chunk[R] = {
+    run((ZStream(events:_*) >>> matchCut(parser)).runCollect)
+  }
+}
+
+object TickParsers extends Parsers {
+
+  case class Tick(v: Int, t: Int)
+
+  override type EventIn = Tick
+
+  implicit val showEventIn: Show[Tick] = Show.fromToString
+
   // the lack of flatMap means that we can't actually detect three increasing values in an intuitive way
-  lazy val increasing: Parser[Tick, Int] = (
-    Parser.pattern[Tick,Int] {
+  lazy val increasing: Parser[Int] = (
+    pattern[Int] {
       case a => a.v
     } ~
-      Parser.pattern[Tick,Int] {
-        case a => a.v
-      } ~
-      Parser.pattern[Tick,Int] {
-        case a => a.v
-      } ^^ ((a,b,c) => if (c > b && b > a) 1 else 0 )
-    )
+    pattern[Int] {
+      case a => a.v
+    } ~
+    pattern[Int] {
+      case a => a.v
+    } ^^ ((a,b,c) => if (c > b && b > a) 1 else 0 )
+  )
+}
+
+class ZioStreamSpecs extends wordspec.AnyWordSpec {
+
+  import CharParsers._
 
   "character stream parse simple" should {
     "parse a" in {

@@ -18,7 +18,7 @@
 
 organization := "io.github.littlenag"
 
-name := "zparsers" //"sparse"
+name := "zparsers" //"sparse"  zroutines?
 
 scalaVersion := "2.12.10"
 
@@ -26,34 +26,35 @@ addCompilerPlugin("org.typelevel" %% "kind-projector" % "0.11.0" cross CrossVers
 
 resolvers += "Scalaz Bintray Repo" at "https://dl.bintray.com/scalaz/releases"
 
-//"1.0.0-RC18-2"
-//"1.0.0-RC19-2+20-e3d5c945-SNAPSHOT"
-val zioVersion = "1.0.0-RC20+43-6bbfac81-SNAPSHOT"
+//val zioVersion = "1.0.0-RC20+43-6bbfac81-SNAPSHOT"
+val zioVersion = "1.0.0-RC21-2"
 
 libraryDependencies ++= Seq(
-  "com.lihaoyi" %% "sourcecode" % "0.1.9",
+  "com.lihaoyi"            %% "sourcecode"      % "0.1.9",
 
-  "org.scalaz"         %% "scalaz-core"   % "7.2.30",
-  "org.scalaz.stream"  %% "scalaz-stream" % "0.8.6a",
+  "org.scalaz"             %% "scalaz-core"     % "7.2.30",
+  "org.scalaz.stream"      %% "scalaz-stream"   % "0.8.6a",
 
+  // Coroutines!
+  "io.github.littlenag"    %% "coroutines-impl" % "0.9-SNAPSHOT",
 
-  "dev.zio"            %% "zio"           % zioVersion,
-  "dev.zio"            %% "zio-streams"   % zioVersion,
+  "dev.zio"                %% "zio"             % zioVersion,
+  "dev.zio"                %% "zio-streams"     % zioVersion,
 
   "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2",
 
-  "co.fs2"             %% "fs2-core"      % "2.2.1",
+  "co.fs2"                 %% "fs2-core"        % "2.2.1",
 
-  "com.lihaoyi"        %% "fastparse"     % "2.2.2",
+  "com.lihaoyi"            %% "fastparse"       % "2.2.2",
 
-  "com.typesafe.akka"  %% "akka-stream"   % "2.6.5",
+  "com.typesafe.akka"      %% "akka-stream"     % "2.6.5",
 
-  "io.monix"           %% "monix"         % "3.2.1",
-  "io.monix"           %% "monix-eval"    % "3.2.1",
-  "io.monix"           %% "monix-tail"    % "3.2.1",
+  "io.monix"               %% "monix"           % "3.2.1",
+  "io.monix"               %% "monix-eval"      % "3.2.1",
+  "io.monix"               %% "monix-tail"      % "3.2.1",
 
-  "org.specs2"         %% "specs2-core"   % "4.9.3" % Test,
-  "org.scalatest"      %% "scalatest"     % "3.1.1" % Test
+  "org.specs2"             %% "specs2-core"     % "4.9.3" % Test,
+  "org.scalatest"          %% "scalatest"       % "3.1.1" % Test
 )
 
 scalacOptions in Test ++= Seq("-Yrangepos")
