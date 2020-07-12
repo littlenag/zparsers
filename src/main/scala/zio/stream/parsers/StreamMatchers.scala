@@ -106,6 +106,11 @@ trait StreamMatchers { self: Parsers =>
                     // For each event in the chunk, push it to the parser, process the result
                     val (finalCache, finalParser, toEmit) = is.foldLeft(initialState) { case ((cache, parser, pr), event) =>
 
+                      // need to inject with elapsed time since last event
+                      // to match on time have to create a stream of pseudo events that correspond to blocks of time
+                      // then your parsers can match on those time "events" as well
+                      // with zio, would have to know that the returned parser expected a timeout, then could race
+                      // a pushed queue and a scheduler?
                       val (newCache, derived) = parser.derive(event).run(cache).value
 
                       println(s">>input: '$event', parser: $parser ~> parser: $derived")
@@ -136,7 +141,8 @@ trait StreamMatchers { self: Parsers =>
 
                   case e @ (_, _, _) =>
                     println("!!!!!!!!!!!!!!!!!!! unexpected !!!!!!!!!!!!!!!!!!!!!!!!")
-                    Push.next /*ZIO.dieMessage(s"Parser continued with terminated parser. $e")*/ -> cleanState
+                    /* ZIO.dieMessage(s"Parser continued with terminated parser. $e") */
+                    Push.next -> cleanState
 
                 }.flatten
           }
