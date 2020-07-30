@@ -1,5 +1,8 @@
 package zio.stream.driver
 
+import zio.stream.driver.Window.WindowOp
+
+import scala.annotation.unchecked.uncheckedVariance
 import scala.concurrent.duration.Duration
 
 /**
@@ -69,8 +72,7 @@ final case class Buffer[IR, IE, OR, OE](duration: Duration, processor: SleepingP
 
 // can adapt parsers and coroutines to Processors
 // Error channel?
-trait Processor[-IR, -IE, +OR, +OE] extends Serializable {
-  self =>
+trait Processor[-IR, -IE, +OR, +OE] extends Serializable { self =>
 
   // suspending functions:
   // yield(value)     -> resume with unit
@@ -180,42 +182,87 @@ import Window._
  * @tparam OR
  * @tparam OE
  */
-sealed trait Window[IE, OR, OE] extends Serializable { self =>
+sealed abstract class Window[IE, OR, OE](val op: WindowOp) extends Serializable { self =>
 
   // this would NOT be a good place for generic map and filter functions for streams!
 
   val processor: Processor[_, IE, OR, OE]
 
-  val op: WindowOp
-
-  val next: op.Args => Window[IE, _, OE]
-
+  // Called
+  val onHalt: Either[(String, List[IE]), OR] => Option[Window[IE, _, OE]] = _ => None
 
   // error recovery?
-  val onError: Option[op.Args => Window[IE, _, OE]] = None
+  val onError: Option[() => Window[IE, _, OE]] = None
 
   // Events to be processed before those in the stream
-  val tracePrefix: List[IE] = Nil
+  val tracePrefix: List[IE @uncheckedVariance] = List.empty[IE]
 
-  def withTracePrefix(trace: List[IE]): Window[IE, OR, OE] = new Window[IE, OR, OE] {
+  def withTracePrefix(trace: List[IE]): Window[IE, OR, OE] = new Window[IE, OR, OE](self.op) {
     override val tracePrefix: List[IE] = trace
     override val processor = self.processor
-    override val op: self.op.type = self.op
-    override val next: self.op.Args => Window[IE, _, OE] = self.next
+    //override val op: self.op.type = self.op
+    override val onHalt = self.onHalt
   }
 
+
+  def forever: Window[IE, OR, OE] = {
+    def fresh: Window[IE, OR, OE] = new Window[IE, OR, OE](self.op) {
+      override val tracePrefix: List[IE] = self.tracePrefix
+      override val processor = self.processor
+      //override val op: self.op.type = self.op
+      override val onHalt = _ => Option(fresh)
+    }
+
+    fresh
+  }
+
+  // map and flatMap?
+
+}
+
+object WindowOpExt {
+  def unapply[IE, OR, OE](w: Window[IE, OR, OE]): Option[WindowOp] = Option(w.op)
 }
 
 object Window {
 
-  // Describes how a Window is to be interpretted
+  def foo[IE, OR, OE](w: Window[IE, OR, OE]) = {
+    w.op match {
+      case op @ ToCompletion() =>
+        w.onHalt.apply(Right(null.asInstanceOf[OR]))
+
+      case ForCount(n) =>
+
+    }
+  }
+
+
+  def toCompletion[IE, OR, OE](processor0: Processor[_, IE, OR, OE]): Window[IE, OR, OE] =
+    new Window[IE, OR, OE](ToCompletion()) {
+      val processor = processor0
+      //val op: WindowOp = ToCompletion()
+    }
+
+  def haltedSuccess[IE, OR, OE](value: OR): Window[IE, OR, OE] =
+    new Window[IE, OR, OE](ToCompletion()) {
+      val processor = CompletedProcessor(value)
+      //val op: WindowOp = ToCompletion()
+    }
+
+  def haltedFailure[IE, OR, OE](errMessage: String): Window[IE, OR, OE] =
+    new Window[IE, OR, OE](ToCompletion()) {
+      val processor = FailedProcessor(errMessage)
+      //val op: WindowOp = ToCompletion()
+    }
+
+  // Describes how a Window is to be interpreted
   sealed trait WindowOp extends Serializable {
-    type Args
+
   }
 
   // Full, closed Window that accepts no more events and has a process that is already halted (completed or failed)
   case class Closed() extends WindowOp {
-    type Args = Nothing
+
   }
 
   // Full
@@ -224,44 +271,31 @@ object Window {
     //   list of events processed
     // else
     //   parser result
-    type Args = Either[(String, List[IE]), OR]
   }
 
   // Partial - run the window over the next N events
   case class ForCount(count:Int) extends WindowOp {
     // to complete the window
     // current processor
-    // can you replace a processor mid-window?
-    type Args = Unit
+    // can you replace a processor mid-window? don't like this idea
+
+    // did the count complete?
+    // if not, what events were accepted? or how many were?
+
   }
 
   // Partial - run the window for the next duration
   case class ForDuration(duration: Duration) extends WindowOp {
     // to complete the window
     // current processor
-    // can you replace a processor mid-window?
-    type Args = Unit
+    // can you replace a processor mid-window? don't really like this idea
+
+    // did the window timeout?
+    // if not, what events were accepted? or how many were?
+
   }
 
 
-
-
-//  def apply[IE, OR, OE](
-//                         fresh0: Processor[_, IE, OR, OE],
-//                         next0: IE => (List[OE], Option[Window[IE, OR, OE]])
-//                       ): Window[IE, OR, OE] =
-//    apply(fresh0, fresh0, next0)
-//
-//  def apply[IE, OR, OE](
-//                         fresh0: Processor[_, IE, OR, OE],
-//                         current0: Processor[_, IE, OR, OE],
-//                         next0: IE => (List[OE], Option[Window[IE, OR, OE]])
-//                       ): Window[IE, OR, OE] =
-//    new Window[IE, OR, OE] {
-//      val freshProcessor = fresh0
-//      val currentProcessor = current0
-//      val next = next0
-//    }
 //
 //  def bounded[IE, OR, OE](
 //                         duration0: Duration,
