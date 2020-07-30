@@ -64,9 +64,13 @@ import scala.concurrent.duration.Duration
 
 sealed trait ProcessingResult[-IR, -IE, +OR, +OE] extends Serializable with Product
 final case class Completed[+OR](value: OR) extends ProcessingResult[Any, Any, OR, Nothing]
-final case class Failed(msg: String) extends ProcessingResult[Any, Any, Nothing, Nothing]
+final case class Failed[+OE](err: OE) extends ProcessingResult[Any, Any, Nothing, OE]
 final case class Yield[IR, IE, OR, OE](toEmit: OE, processor: ReadyProcessor[IR, IE, OR, OE]) extends ProcessingResult[IR, IE, OR, OE]
+
+// Wait until some event is available
 final case class Next[IR, IE, OR, OE](processor: AwaitingProcessor[IR, IE, OR, OE]) extends ProcessingResult[IR, IE, OR, OE]
+
+// duration <= 0, return any immediately available values
 final case class Buffer[IR, IE, OR, OE](duration: Duration, processor: SleepingProcessor[IR, IE, OR, OE]) extends ProcessingResult[IR, IE, OR, OE]
 
 
@@ -188,10 +192,14 @@ sealed abstract class Window[IE, OR, OE](val op: WindowOp) extends Serializable 
 
   val processor: Processor[_, IE, OR, OE]
 
-  // Called
-  val onHalt: Either[(String, List[IE]), OR] => Option[Window[IE, _, OE]] = _ => None
+  // Called when the process halts
+  // Left(processor err, events that failed to process)
+  // Right(value processor succeeded with)
+  val onHalt: Either[(OE, List[IE]), OR] => Option[Window[IE, OR, OE]] = _ => None
 
-  // error recovery?
+  // mid-stream error recovery?
+  // none -> window offers recovery, processing stops
+  //
   val onError: Option[() => Window[IE, _, OE]] = None
 
   // Events to be processed before those in the stream
