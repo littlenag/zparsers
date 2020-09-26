@@ -1,5 +1,7 @@
 package zio.stream.driver
 
+import java.time.Instant
+
 import zio.stream.driver.Window.WindowOp
 
 import scala.annotation.unchecked.uncheckedVariance
@@ -60,66 +62,80 @@ import scala.concurrent.duration.Duration
  *
  * events should be instantaneous, blocks of time consume time
  *
+ * can adapt parsers and coroutines to Processors
+ * Error channel?
+ *
+ * I = consumed event type
+ * R = materialized result type
+ * O = emitted event type
+ *
  */
-
-sealed trait ProcessingResult[-IR, -IE, +OR, +OE] extends Serializable with Product
-final case class Completed[+OR](value: OR) extends ProcessingResult[Any, Any, OR, Nothing]
-final case class Failed[+OE](err: OE) extends ProcessingResult[Any, Any, Nothing, OE]
-final case class Yield[IR, IE, OR, OE](toEmit: OE, processor: ReadyProcessor[IR, IE, OR, OE]) extends ProcessingResult[IR, IE, OR, OE]
-
-// Wait until some event is available
-final case class Next[IR, IE, OR, OE](processor: AwaitingProcessor[IR, IE, OR, OE]) extends ProcessingResult[IR, IE, OR, OE]
-
-// duration <= 0, return any immediately available values
-final case class Buffer[IR, IE, OR, OE](duration: Duration, processor: SleepingProcessor[IR, IE, OR, OE]) extends ProcessingResult[IR, IE, OR, OE]
-
-
-// can adapt parsers and coroutines to Processors
-// Error channel?
-trait Processor[-IR, -IE, +OR, +OE] extends Serializable { self =>
-
-  // suspending functions:
-  // yield(value)     -> resume with unit
-  // next()           -> resume with event
-  // buffer(duration) -> resume with list[event]
-
-  // better to have sleep() that doesn't return values and next with a timeout? where 0 means return a queued value?
-  // maybe hasWaiting?
-
+sealed trait Processor[-I, +R, +O] extends Serializable { self =>
 
   // map function? can map a parser, how about a coroutine?
 
   //def map[R](f: OR => R): Processor[IR, IE, R, OE]
 
   //def comap[R](f: R => IR): Processor[R, IE, OR, OE]
+
+  // Query current state
+  def state(): ProcessorState
+
+  // Events that should be emitted
+  def toEmit: List[O]
+
+  // If Awaiting, to be called once there is a new event
+  // If Sleeping, to be called once enough time has elapsed (gets into wall clock vs event clock issues)
+  // Error if called from any other state
+  def resume(events: List[I]): Processor[I, R, O]
+
+  sealed trait ProcessorState extends Serializable
+
+  // Processor that has completed with a value (which is NOT emitted), processes no stream elements
+  final case class Completed(value: R) extends ProcessorState
+
+  // Processor that has failed with some message, processes no stream elements
+  final case class Failed(err: Throwable) extends ProcessorState
+
+  // Processor is awaiting the next event in the stream
+  case object Awaiting extends ProcessorState
+
+  // Processor is awaiting a timeout, letting events accrue
+  case class Sleeping(start:Instant, end:Instant) extends ProcessorState
+
+
+  // have to adapt this state machine to that of
+  // coroutines and parser derivatives
+
+//  // To be called from a Ready state - implicit: Processor is not yet ready to handle any events
+//  def resume_(): Processor[IR, IE, OR, OE]
+//
+//  // To be called from an Awaiting state - implicit: Processor is only able to handle the next event
+//  def process_(event: IE): Processor[IR, IE, OR, OE]
+//
+//  // To be called from a Sleeping state - implicit: Processor will handle all arrived events
+//  def awake_(events: List[IE]): Processor[IR, IE, OR, OE]
+//
+//  sealed trait ProcessorState extends Serializable
+//
+//  // Processor that has completed with a value (which is NOT emitted), processes no stream elements
+//  final case class Completed(value: OR) extends ProcessorState
+//
+//  // Processor that has failed with some message, processes no stream elements
+//  final case class Failed(err: Throwable) extends ProcessorState
+//
+//  // Processor is ready to run
+//  case object Ready extends ProcessorState
+//
+//  // Processor is awaiting the next event in the stream
+//  case object Awaiting extends ProcessorState
+//
+//  // Processor is awaiting a timeout, letting events accrue
+//  case class Sleeping(start:Instant, end:Instant) extends ProcessorState
+
 }
 
-sealed trait Halted
-sealed trait Running
 
-// Processor that has completed with a value, processes no stream elements
-case class CompletedProcessor[-IR, -IE, +OR, +OE](value: OR) extends Processor[IR,IE,OR,OE] with Halted {
-
-}
-
-// Processor that has failed with some message, processes no stream elements
-case class FailedProcessor[-IR, -IE, +OR, +OE](msg: String) extends Processor[IR,IE,OR,OE] with Halted {
-}
-
-// Processor is ready to run
-trait ReadyProcessor[-IR, -IE, +OR, +OE] extends Processor[IR,IE,OR,OE] with Running { self =>
-  def resume(): ProcessingResult[IR, IE, OR, OE]
-}
-
-// Processor is awaiting the next event in the stream
-trait AwaitingProcessor[-IR, -IE, +OR, +OE] extends Processor[IR,IE,OR,OE] with Running { self =>
-  def process(event: IE): ProcessingResult[IR, IE, OR, OE]
-}
-
-// Processor is awaiting a timeout, letting events accrue
-trait SleepingProcessor[-IR, -IE, +OR, +OE] extends Processor[IR, IE, OR, OE] with Running { self =>
-  def awake(events: List[IE]): ProcessingResult[IR, IE, OR, OE]
-}
 
 /**
  * a window is an algebra that has to be run in the context of a driver
@@ -164,6 +180,9 @@ import Window._
 
 /**
  *
+ * describes how long to run the processor and what to do once the processor has
+ * either halted (completed/failed) or encountered an upstream error
+ *
  * a window needs to be a description of how to build the trace of events that a process will eventually operate on
  *
  * needs a notion of the events seen so far or operated on so far, and notion of events yet to come
@@ -174,50 +193,41 @@ import Window._
  *  - window state
  *  - events in acc buffer
  *
- *  these things depend on the window op
+ * these things depend on the window op
  *
- *
- * I = In
- * O = Out
- * E = events
- * R = result
- *
- * @tparam IE
- * @tparam OR
- * @tparam OE
+ * @tparam I consumed event type
+ * @tparam R materialized result type
+ * @tparam O emitted event type
  */
-sealed abstract class Window[IE, OR, OE](val op: WindowOp) extends Serializable { self =>
+sealed abstract class Window[I, R, O](val op: WindowOp) extends Serializable { self =>
 
   // this would NOT be a good place for generic map and filter functions for streams!
 
-  val processor: Processor[_, IE, OR, OE]
+  val processor: Processor[I, R, O]
 
   // Called when the process halts
   // Left(processor err, events that failed to process)
   // Right(value processor succeeded with)
-  val onHalt: Either[(OE, List[IE]), OR] => Option[Window[IE, OR, OE]] = _ => None
+  val onHalt: Either[(O, List[I]), R] => Option[Window[I, R, O]] = _ => None
 
+  // called because of an upstream error
   // mid-stream error recovery?
-  // none -> window offers recovery, processing stops
-  //
-  val onError: Option[() => Window[IE, _, OE]] = None
+  // none -> window offers no recovery, processing stops
+  val onError: Option[() => Window[I, _, O]] = None
 
   // Events to be processed before those in the stream
-  val tracePrefix: List[IE @uncheckedVariance] = List.empty[IE]
+  val tracePrefix: List[I @uncheckedVariance] = List.empty[I]
 
-  def withTracePrefix(trace: List[IE]): Window[IE, OR, OE] = new Window[IE, OR, OE](self.op) {
-    override val tracePrefix: List[IE] = trace
-    override val processor = self.processor
-    //override val op: self.op.type = self.op
-    override val onHalt = self.onHalt
-  }
+  def withProcessor(processor0: Processor[I, R, O]): Window[I, R, O] =
+    Window(op, processor0, tracePrefix, onHalt)
 
+  def withTracePrefix(trace: List[I]): Window[I, R, O] =
+    Window(op, processor, self.tracePrefix ++ trace, onHalt)
 
-  def forever: Window[IE, OR, OE] = {
-    def fresh: Window[IE, OR, OE] = new Window[IE, OR, OE](self.op) {
-      override val tracePrefix: List[IE] = self.tracePrefix
+  def forever: Window[I, R, O] = {
+    def fresh: Window[I, R, O] = new Window[I, R, O](self.op) {
+      override val tracePrefix: List[I] = self.tracePrefix
       override val processor = self.processor
-      //override val op: self.op.type = self.op
       override val onHalt = _ => Option(fresh)
     }
 
@@ -234,18 +244,21 @@ object WindowOpExt {
 
 object Window {
 
-  def foo[IE, OR, OE](w: Window[IE, OR, OE]) = {
-    w.op match {
-      case op @ ToCompletion() =>
-        w.onHalt.apply(Right(null.asInstanceOf[OR]))
 
-      case ForCount(n) =>
-
+  def apply[I, R, O](op: WindowOp,
+                     processor: Processor[I, R, O],
+                     trace: List[I] = List.empty[I],
+                     onHalt: Either[(O, List[I]), R] => Option[Window[I, R, O]] = _ => None
+                       ): Window[I, R, O] = {
+    new Window[I, R, O](op) {
+      override val tracePrefix: List[I] = trace
+      override val processor = processor
+      override val onHalt = onHalt
     }
   }
 
 
-  def toCompletion[IE, OR, OE](processor0: Processor[_, IE, OR, OE]): Window[IE, OR, OE] =
+  def toCompletion[IE, OR, OE](processor0: Processor[IE, OR, OE]): Window[IE, OR, OE] =
     new Window[IE, OR, OE](ToCompletion()) {
       val processor = processor0
       //val op: WindowOp = ToCompletion()
@@ -257,9 +270,9 @@ object Window {
       //val op: WindowOp = ToCompletion()
     }
 
-  def haltedFailure[IE, OR, OE](errMessage: String): Window[IE, OR, OE] =
+  def haltedFailure[IE, OR, OE](err: OE): Window[IE, OR, OE] =
     new Window[IE, OR, OE](ToCompletion()) {
-      val processor = FailedProcessor(errMessage)
+      val processor = FailedProcessor(err)
       //val op: WindowOp = ToCompletion()
     }
 
