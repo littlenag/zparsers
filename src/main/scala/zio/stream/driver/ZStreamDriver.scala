@@ -1,9 +1,11 @@
 package zio.stream.driver
 
 import java.time.Instant
+import java.util.concurrent.TimeUnit
 
 import zio._
 import zio.clock.Clock
+import zio.duration.Duration
 import zio.stream._
 import zio.stream.ZStream._
 
@@ -13,163 +15,149 @@ class ZStreamDriver(clock: Clock) {
     def eventTimestamp(e:E): Instant
   }
 
-  def applyWindow[R,E,I: EventTimestamp,O](window: Window[I,O,E], stream: ZStream[R, E, I]): ZStream[R, E, O] = {
+  def applyWindow[Env,I:EventTimestamp,O,E](processor: Processor[I,O], stream: ZStream[Env, E, I]): ZStream[Env, E, O] = {
+    import processor._
+
     ZStream {
 
       // setup state here
 
+      /*
+       *
+       * ref, with boolean of whether or not to call wakeup, that pull checks immediately, prior to pull from upstream
+       * ref, handle to fiber that is waiting to ping the wakeup alarm
+       * ref, of the previous processor state
+       * if a processor transitions away from its current sleeping state to a new state, then cancel the wakeup alarm fiber
+       *   - if to a new sleeping state, then start a new fiber with a new timeout
+       *
+       * how to handle starting in a sleeping state?
+       */
       for {
         upStream <- stream.process
-        // events that the window _may_ need to create a replacement window in case of error
-        bufferedEvents <- ZRef.makeManaged(Chunk[I]())
-        eventsToEmit <- ZRef.makeManaged(Chunk[I]())
-        windowState <- ZRef.makeManaged(window)
+
+        // exists in case we need a side-fiber for timeouts
+        wakeupAlarmFiber <- ZRef.makeManaged(Option.empty[Fiber.Runtime[Unit, Unit]])
+        doWakeupAlarm <- ZRef.makeManaged(false)
+
+        // FIXME handle processors that start in a sleeping state
+        previousProcessorState <- ZRef.makeManaged(processor.state())
+
         pull = {
 
-          def handleProcessResult(pr: ProcessingResult[_, I, O, E]): ZIO[Any, Option[E], Chunk[O]] = pr match {
-            case Completed(value) =>
-              Pull.emit(value) *> {
-                window.onHalt(Right(value)) match {
-                  case Some(nextWindow) => bufferedEvents.set(Chunk[I]()) *> windowState.set(nextWindow)
-                  case None => Pull.end
-                }
-              }
-            case Failed(err) =>
-              Pull.fail(err) *> bufferedEvents.get.flatMap { e =>
-                window.onHalt(Left((err,e.toList))) match {
-                  case Some(nextWindow) => bufferedEvents.set(Chunk[I]()) *> windowState.set(nextWindow)
-                  case None => Pull.end
-                }
-              }
+          def mkWakup(alarm:Duration): ZIO[Any, Unit, Unit] = {
+            val action = for {
+              _ <- ZIO.sleep(alarm)
+              _ <- doWakeupAlarm.set(true)
+            } yield ()
 
-            case Yield(toEmit, rp) =>
-              Pull.emit(toEmit) *> windowState.set(window.withProcessor(rp))
+            for {
+              fiber <- action.onInterrupt(wakeupAlarmFiber.set(None)).provide(clock).fork
+              _ <- wakeupAlarmFiber.set(Option(fiber))
+            } yield ()
 
-            case Next(ap) =>
-              windowState.set(window.withProcessor(ap))
-
-            case Buffer(duration, sp) =>
-              (Nil, Some(bounded(duration, freshProcessor, sp, this.next)))
           }
 
+          def go(events: Chunk[I]): ZIO[Any, Option[E], Chunk[O]] = {
+            for {
+              // are you resuming into a sleeping processor or a active processor?
+              _ <- Task(processor.resume(events.toList)).mapError(_ => None)
 
-          def go: ZIO[Any, Option[E], Chunk[O]] = windowState.get.flatMap { window =>
+              previousState <- previousProcessorState.get
 
-            // processor maybe halted
-            // events may be waiting for processing in the trace prefix
+              maybeFiber <- wakeupAlarmFiber.get
 
-            window.processor match {
+              // if the state changed, and we have a wake fiber, then cancel it
 
-              case CompletedProcessor(value) =>
-                window.onHalt(Right(value)) match {
-                  case Some(nextWindow) =>
-                    bufferedEvents.set(Chunk[I]()) *> windowState.set(nextWindow) *> (
-                      if ()
-                    )
-                  case None => Pull.end
-                }
+              /*
+              if there is a wake fiber
+                and the resume changes/eliminates the wakeup time,
+                  then
+                    interrupt the fiber, and clear wakup alarm bool
+                    handle the new events
+                    if the new state is a sleeping state
+                      start a wake fiber
+                  else
+                    there should be no new events
+               else
+                  handle the new events
+                  if the new state is a sleeping state
+                    start a wake fiber
+               */
+              toEmit <- ( (maybeFiber, previousState, processor.state()) match {
 
-              case FailedProcessor(err) =>
-                bufferedEvents.get.flatMap { e =>
-                  window.onHalt(Left((err,e.toList))) match {
-                    case Some(nextWindow) =>
-                      bufferedEvents.set(Chunk[I]()) *> windowState.set(nextWindow)
-                    case None => Pull.end
-                  }
-                }
+                case (Some(_), Sleeping(_,e1,_), Sleeping(_,e2,_)) if e1 == e2 =>
+                  Pull.empty[O]
 
-              case p: Running =>
-            }
+                case (Some(fiber), _, Sleeping(e1,e2,toEmit)) =>
 
-            val x = ZIO.foreach(window.tracePrefix) { event =>
+                  val duration = zio.duration.Duration(e2.toEpochMilli - e1.toEpochMilli, TimeUnit.MILLISECONDS)
 
-              window.processor match {
+                  fiber.interrupt *> doWakeupAlarm.set(false) *> mkWakup(duration) *> Pull.emit[O](Chunk.fromIterable(toEmit))
 
-                case p: CompletedProcessor[_,I,O,E] =>
-                  handleProcessResult(p.resume())
+                case (None, _, Completed(toEmit)) =>
+                  // FIXME
+                  Pull.emit(Chunk.fromIterable(toEmit)) *> Pull.end
 
-                case p: FailedProcessor[_,I,O,E] =>
-                  handleProcessResult(p.err)
+                case (None, _, Failed(err, toEmit)) =>
+                  // FIXME
+                  Pull.emit(Chunk.fromIterable(toEmit)) *> Pull.end
 
-                case p: ReadyProcessor[_,I,O,E] =>
-                  handleProcessResult(p.resume())
+                case (None, _, Awaiting(toEmit)) =>
+                  Pull.emit(Chunk.fromIterable(toEmit))
 
-                case p: AwaitingProcessor[_,I,O,E] =>
-                  handleProcessResult(p.process(event))
+                case (None, _, Sleeping(e1,e2,toEmit)) =>
 
-                case p: SleepingProcessor[_, I, O, E] =>
-                  p.wakeup()
-              }
+                  val duration = zio.duration.Duration(e2.toEpochMilli - e1.toEpochMilli, TimeUnit.MILLISECONDS)
 
+                  doWakeupAlarm.set(false) *> mkWakup(duration) *> Pull.emit[O](Chunk.fromIterable(toEmit))
+              } ).mapError(_ => Option.empty[E])
 
-            }
+            } yield toEmit
 
-
-            // Process the prefix before any new events
-            window.tracePrefix match {
-              case head :: tail =>
-
-              case Nil =>
-
-                window.processor match {
-
-                  case p: ReadyProcessor[_, I, O, E] =>
-                    p.resume() match {
-                      case Completed(value) =>
-                        Pull.emit(value) *> {
-                          window.onHalt(Right(value)) match {
-                            case Some(nextWindow) => bufferedEvents.set(Chunk[I]()) *> windowState.set(nextWindow)
-                            case None => Pull.end
-                          }
-                        }
-                      case Failed(err) =>
-                        Pull.fail(err) *> bufferedEvents.get.flatMap { e =>
-                          window.onHalt(Left((err, e.toList))) match {
-                            case Some(nextWindow) => bufferedEvents.set(Chunk[I]()) *> windowState.set(nextWindow)
-                            case None => Pull.end
-                          }
-                        }
-
-                      case Yield(toEmit, rp) =>
-                        Pull.emit(toEmit) *> windowState.set(window.withProcessor(rp))
-
-                      case Next(ap) =>
-                        upStream.flatMap { v =>
-
-
-                          windowState.set(window.withProcessor(rp))
-                        }
-                      case Buffer(duration, sp) => (Nil, Some(bounded(duration, freshProcessor, sp, this.next)))
-                    }
-
-                  case p: AwaitingProcessor[_, I, O, E] =>
-                    p.eval(in) match {
-                      case Completed(value, toEmit) => (toEmit, None)
-                      case Failed(msg) => (Nil, None) // TODO propagate error
-                      case Yield(toEmit, rp) => (List(toEmit), Some(Window(rp, this.next)))
-                      case Next(ap) => (Nil, Some(Window(ap, this.next)))
-                      case Buffer(duration, sp) => (Nil, Some(bounded(duration, freshProcessor, sp, this.next)))
-                    }
-
-                  case p: SleepingProcessor[_, IE, OR, OE] =>
-                    p.wakeup()
-                }
-              }
-            }
+          }
 
           // pull from upstream
-          // add resulting events to the trace
           // for each event, let window process, accumulate results and emit
 
-          //
-
           for {
+            //
+            doWakeup <- doWakeupAlarm.get
+            toEmitFromWakeup <- if (doWakeup) {
+              processor.wakeup()
+
+              // we assume the fiber will clean itself up upon its clean exit OR its interruption
+              // so you should never have an alarm set AND a fiber running at the same time
+
+              // and process the next state
+
+              val action = processor.state() match {
+                case Completed(toEmit) =>
+                  // FIXME seems that events won't be emitted that maybe should be?
+                  // need another ref for cleanup maybe?
+                  Pull.emit(Chunk.fromIterable(toEmit)) *> Pull.end
+
+                case Failed(err, toEmit) =>
+                  // FIXME seems that events won't be emitted that should be
+                  Pull.emit(Chunk.fromIterable(toEmit)) *> Pull.fail(null.asInstanceOf[E])
+
+                case Awaiting(toEmit) =>
+                  Pull.emit(Chunk.fromIterable(toEmit))
+
+                case Sleeping(start, end, toEmit) =>
+                  // how to buffer?
+                  Pull.emit(Chunk.fromIterable(toEmit))
+              }
+
+              // Clear the flag since it has been handled
+              doWakeupAlarm.set(false) *> action
+            } else {
+              Pull.empty
+            }
+
+            //
             newEvents <- upStream
-            w <- windowState.get
-            _ <- windowState.set(w.withTracePrefix(newEvents.toList))
-            _ <- eventsToEmit.set(Chunk[I]())
-            toEmit <- go
-          } yield toEmit
+            toEmit <- go(newEvents)
+          } yield toEmitFromWakeup ++ toEmit
         }
       } yield pull
     }
