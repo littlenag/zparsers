@@ -7,6 +7,8 @@ import cats.syntax.monad._
 import cats.syntax.show._
 import cats.syntax.either._
 
+import scala.util.matching.Regex
+
 object Syntax {
 
   type \/[A,B] = Either[A,B]
@@ -19,12 +21,17 @@ object Syntax {
 
 import Syntax._
 
-trait Parsers {
-  // Type of events are we are parsing on
-  type EventIn
+trait ParseFromTo[I, O] extends ParsersFor[I] {
+  def parser(): Parser[O]
+}
+
+// Type of events are we are parsing on
+trait ParsersFor[I] {
+
+  type EventIn = I
 
   // Types of events we'll emit on partial matches
-  type EventOut
+  //type EventOut
 
   /**
    * Applicative (not monadic!) parser interface defined by two functions (simplified types):
@@ -98,11 +105,11 @@ trait Parsers {
   }
 
   // yep, indexing on value identity LIKE A BOSS
-  type Cache = KMap[Lambda[α => (EventIn, Parser[α])], Lambda[α => () => Parser[α]]]
+  type Cache = KMap[Lambda[α => (I, Parser[α])], Lambda[α => () => Parser[α]]]
   //type Cache = KMap[({type λ[α] = (EventIn, Parser[α])})#λ, ({type λ[α] = () => Parser[α]})#λ]
 
   // creates an empty cache
-  def Cache = KMap[({type λ[α] = (EventIn, Parser[α])})#λ, ({type λ[α] = () => Parser[α]})#λ]()
+  def cache(): Cache = KMap[({type λ[α] = (I, Parser[α])})#λ, ({type λ[α] = () => Parser[α]})#λ]()
 
   /**
    * Parser for the empty string, producing a given result.
@@ -118,14 +125,14 @@ trait Parsers {
   /**
    * Parser for a single literal token, producing that token as a result.  Parametricity!
    */
-  implicit def literal(token: EventIn)(implicit ev1: Eq[EventIn], ev2: Show[EventIn]): Parser[EventIn] = new Incomplete[EventIn] {
+  implicit def literal(token: I)(implicit ev1: Eq[I], ev2: Show[I]): Parser[I] = new Incomplete[I] {
 
     override val toString: String = s"lit(${token.show})"
 
     def innerComplete[R](seen: Set[Parser[_]]) = Left(Error(s"unexpected end of stream; expected '${token.show}'"))
 
-    def innerDerive(candidate: EventIn): State[Cache, Parser[EventIn]] = {
-      val result: Parser[EventIn] =
+    def innerDerive(candidate: I): State[Cache, Parser[I]] = {
+      val result: Parser[I] =
         if (candidate === token)
           completed(token)
         else
@@ -135,13 +142,13 @@ trait Parsers {
     }
   }
 
-  def pattern[T](pf: PartialFunction[EventIn, T])(implicit ev2: Show[EventIn]): Parser[T] = new Incomplete[T] {
+  def pattern[T](pf: PartialFunction[I, T])(implicit ev2: Show[I]): Parser[T] = new Incomplete[T] {
 
     override val toString: String = s"pattern(...)"
 
     def innerComplete[R](seen: Set[Parser[_]]) = Left(Error(s"unexpected end of stream"))
 
-    def innerDerive(candidate: EventIn) = {
+    def innerDerive(candidate: I) = {
       val result: Parser[T] = if (pf isDefinedAt candidate)
         completed(pf(candidate))
       else
@@ -156,7 +163,7 @@ trait Parsers {
   //
 
   // implicit chaining for literal syntax
-  implicit def literalRichParser(token: EventIn)(implicit ev1: Eq[EventIn], ev2: Show[EventIn]): RichParser[EventIn] =
+  implicit def literalRichParser(token: I)(implicit ev1: Eq[I], ev2: Show[I]): RichParser[I] =
     new RichParser(literal(token))
 
   // it's somewhat important that these functions be lazy
@@ -278,7 +285,7 @@ trait Parsers {
       override def innerComplete[R](seen: Set[Parser[_]]) =
         outer.complete[R](seen).bimap(identity, _ map f)
 
-      override def innerDerive(candidate: EventIn): State[Cache, Parser[Result2]] = {
+      override def innerDerive(candidate: I): State[Cache, Parser[Result2]] = {
         val x = outer innerDerive candidate
         x map { p => p.map(f) }
       }
@@ -317,7 +324,7 @@ trait Parsers {
      * to advance over subsequent tokens, but cannot be completed then-and-there (attempting to do
      * so would result in an Error).
      */
-    final def derive(t: EventIn): State[Cache, Parser[Result]] = {
+    final def derive(t: I): State[Cache, Parser[Result]] = {
       for {
         cache <- State.get[Cache]
         derived <- cache get (t -> this) map { thunk =>
@@ -337,7 +344,7 @@ trait Parsers {
       } yield derived
     }
 
-    protected def innerDerive(candidate: EventIn): State[Cache, Parser[Result]]
+    protected def innerDerive(candidate: I): State[Cache, Parser[Result]]
   }
 
   //
@@ -365,7 +372,7 @@ trait Parsers {
       crr <- right.complete[R](seen)
     } yield Completed((clr.result, crr.result))
 
-    def innerDerive(t: EventIn): State[Cache, Parser[LR ~ RR]] = {
+    def innerDerive(t: I): State[Cache, Parser[LR ~ RR]] = {
       println(s"---seq inner derive. l=$left, r=$right")
 
       (left, right) match {
@@ -439,7 +446,7 @@ trait Parsers {
       }
     }
 
-    def innerDerive(t: EventIn): State[Cache, Parser[Result]] = (left, right) match {
+    def innerDerive(t: I): State[Cache, Parser[Result]] = (left, right) match {
       case (Error(leftMsg), Error(rightMsg)) => State.pure(Error(s"$leftMsg -OR- $rightMsg"))
 
       case (Error(_), Completed(_)) => State.pure(Error("unexpected end of stream"))
@@ -465,6 +472,70 @@ trait Parsers {
         }
 
       }
+    }
+  }
+
+
+
+  // TODO maybe move this to a Util object?  seems useful
+  def parse[R](parser: Parser[R])(str: Seq[I]): Either[Error[R], Completed[R]] = {
+    def inner(str: Seq[I])(parser: Parser[R]): State[Cache, Either[Error[R], Completed[R]]] = {
+      if (str.isEmpty) {
+        State pure parser.complete()
+      } else {
+        parser match {
+          case Completed(_) => State pure Left(Error("unexpected end of stream"))
+          case e @ Error(_) => State pure Left(e)
+
+          case parser: Incomplete[R] =>
+            parser derive str.head flatMap inner(str.tail)
+        }
+      }
+    }
+
+    (inner(str)(parser) run cache()).value._2
+  }
+
+  import scala.collection.SeqLike
+  import scala.collection.generic.CanBuildFrom
+
+  // TODO this also seems useful...
+  def tokenize[Str[_] <: SeqLike[_, _], TokenIn, TokenOut, That <: TraversableOnce[TokenIn \/ TokenOut]](str: Str[TokenIn])(f: Str[TokenIn] => (TokenIn \/ TokenOut, Str[TokenIn]))(implicit cbf: CanBuildFrom[Str[TokenIn], TokenIn \/ TokenOut, That]): That = {
+    if (str.isEmpty) {
+      cbf().result
+    } else {
+      val (token, tail) = f(str)
+
+      val builder = cbf()
+      builder += token
+      builder ++= tokenize(tail)(f)      // TODO it's never worse, tail-recurse!
+      builder.result
+    }
+  }
+
+  // TODO oh look, more useful stuff!
+  def regexTokenize[T](str: String, rules: Map[Regex, List[String] => T]): Seq[Either[Char, T]] = {
+    def iseqAsCharSeq(seq: IndexedSeq[Char]): CharSequence = new CharSequence {
+      def charAt(i: Int) = seq(i)
+      def length = seq.length
+      def subSequence(start: Int, end: Int) = iseqAsCharSeq(seq.slice(start, end))
+      override def toString = seq.mkString
+    }
+
+    tokenize(str: IndexedSeq[Char]) { seq =>
+      val str = iseqAsCharSeq(seq)
+
+      // find the "first" regex that matches and apply its transform
+      val tokenM: Option[(T, IndexedSeq[Char])] = rules collectFirst {
+        case (regex, f) if (regex findPrefixMatchOf str).isDefined => {
+          val m = (regex findPrefixMatchOf str).get
+          (f(m.subgroups), m.after.toString: IndexedSeq[Char])
+        }
+      }
+
+      tokenM map {
+        case (token, tail) => (Right(token), tail)
+      } getOrElse ((Left(seq.head), seq.tail))
     }
   }
 

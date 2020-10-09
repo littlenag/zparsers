@@ -2,6 +2,11 @@ package zio.stream.driver
 
 import java.time.Instant
 
+import org.coroutines.Coroutine
+import zio.Chunk
+import zio.stream.ZTransducer.Push
+import zio.stream.parsers.{ParseFromTo, ParsersFor}
+
 import scala.annotation.unchecked.uncheckedVariance
 import scala.concurrent.duration.Duration
 
@@ -106,36 +111,6 @@ sealed trait Processor[I, O] extends Serializable { self =>
 
   // Processor is awaiting a timeout, letting events accrue
   case class Sleeping(start:Instant, end:Instant, toEmit: List[O]) extends ProcessorState
-
-
-  // have to adapt this state machine to that of
-  // coroutines and parser derivatives
-
-//  // To be called from a Ready state - implicit: Processor is not yet ready to handle any events
-//  def resume_(): Processor[IR, IE, OR, OE]
-//
-//  // To be called from an Awaiting state - implicit: Processor is only able to handle the next event
-//  def process_(event: IE): Processor[IR, IE, OR, OE]
-//
-//  // To be called from a Sleeping state - implicit: Processor will handle all arrived events
-//  def awake_(events: List[IE]): Processor[IR, IE, OR, OE]
-//
-//  sealed trait ProcessorState extends Serializable
-//
-//  // Processor that has completed with a value (which is NOT emitted), processes no stream elements
-//  final case class Completed(value: OR) extends ProcessorState
-//
-//  // Processor that has failed with some message, processes no stream elements
-//  final case class Failed(err: Throwable) extends ProcessorState
-//
-//  // Processor is ready to run
-//  case object Ready extends ProcessorState
-//
-//  // Processor is awaiting the next event in the stream
-//  case object Awaiting extends ProcessorState
-//
-//  // Processor is awaiting a timeout, letting events accrue
-//  case class Sleeping(start:Instant, end:Instant) extends ProcessorState
 
 }
 
@@ -258,6 +233,7 @@ class Window[I, O](
 
 
 }
+
 
 object Window {
 
@@ -383,3 +359,142 @@ object Window {
 //    }
 
 }
+
+
+class ParserProcessor[I, O](val parsers: ParseFromTo[I, O]) extends Processor[I,O] {
+
+  private var p: parsers.Parser[O] = parsers.parser()
+  private var c: parsers.Cache = parsers.cache()
+  private val toEmit = Seq.newBuilder[O]
+
+  // Query current state
+  def state(): ProcessorState = {
+    p match {
+      case i: parsers.Incomplete[O] => Awaiting(Nil)
+      case parsers.Error(msg) => Failed(new RuntimeException(msg),Nil)
+      case parsers.Completed(result:O) => Completed(List(result))
+      //case p.Sleeping(s,e,toEmit) => Sleeping(s,e,toEmit)
+    }
+  }
+
+  private def handleEvent(event:I): Unit = {
+
+    p match {
+      case parsers.Error(_) =>
+        // nothing that can be done
+        p = parsers.Error("already halted in Error - cannot handle new event")
+        c = parsers.cache()
+
+      case parsers.Completed(_) =>
+        p = parsers.Error("already halted in Completed - cannot handle new event")
+        c = parsers.cache()
+
+      case ip: parsers.Incomplete[O] =>
+        val (updatedCache, derived) = ip.derive(event).run(c).value
+
+        (derived.complete[O](), derived) match {
+          case (Left(parsers.Error(_)), nextParser:parsers.Incomplete[O]) =>
+            //(updatedCache, nextParser, pr += ParseIncomplete )
+            p = nextParser
+            c = updatedCache
+
+          case (Left(e : parsers.Error[O]), _) =>
+            //(parsers.cache(), initialParser, pr += ParseFailure(msg1) )
+            p = e
+            c = parsers.cache()
+
+          case (Right(r : parsers.Completed[O]), _) =>
+            //(parsers.cache(), initialParser, pr += ParseSuccess(r) )
+            p = r
+            c = parsers.cache()
+        }
+    }
+  }
+
+  // If Awaiting, to be called once there is a new event
+  // If Sleeping, to be called once enough time has elapsed (gets into wall clock vs event clock issues)
+  // Error if called from any other state
+  def resume(events: List[I]): Unit = {
+    // too much garbage if not side-effecting
+    events.foreach{handleEvent}
+  }
+
+  override def wakeup(): Unit = {}
+
+  // this would NOT be a good place for generic map and filter functions for streams!
+  // reconsider this
+
+
+}
+
+
+// No way to capture the incoming event type (I) in coroutines just yet
+//class CoroutineProcessor[I, O](val coroutine: Coroutine._0[O, Unit]) extends Processor[I,O] {
+//
+//  private var cr: Coroutine.Instance[O, Unit] = coroutine.inst()
+//  private val toEmit = Seq.newBuilder[O]
+//
+//  // Query current state
+//  def state(): ProcessorState = {
+//
+//    // FIXME always expecting a new value, unless failed. add sleeping support
+//    if (cr.hasException) {
+//      Failed(cr.getException.get, Nil)
+//    } else if (cr.hasResult) {
+//      Completed(Nil)
+//    } else if (cr.expectsResumeValue) {
+//      Awaiting(Nil)
+//    } else {
+//      throw new RuntimeException("Illegal Coroutine State")
+//    }
+//  }
+//
+//  private def handleEvent(event:I): Unit = {
+//
+//    cr match {
+//      case parsers.Error(_) =>
+//        // nothing that can be done
+//        cr = parsers.Error("already halted in Error - cannot handle new event")
+//        c = parsers.cache()
+//
+//      case parsers.Completed(_) =>
+//        cr = parsers.Error("already halted in Completed - cannot handle new event")
+//        c = parsers.cache()
+//
+//      case ip: parsers.Incomplete[O] =>
+//        val (updatedCache, derived) = ip.derive(event).run(c).value
+//
+//        (derived.complete[O](), derived) match {
+//          case (Left(parsers.Error(_)), nextParser:parsers.Incomplete[O]) =>
+//            //(updatedCache, nextParser, pr += ParseIncomplete )
+//            cr = nextParser
+//            c = updatedCache
+//
+//          case (Left(e : parsers.Error[O]), _) =>
+//            //(parsers.cache(), initialParser, pr += ParseFailure(msg1) )
+//            cr = e
+//            c = parsers.cache()
+//
+//          case (Right(r : parsers.Completed[O]), _) =>
+//            //(parsers.cache(), initialParser, pr += ParseSuccess(r) )
+//            cr = r
+//            c = parsers.cache()
+//        }
+//    }
+//  }
+//
+//  // If Awaiting, to be called once there is a new event
+//  // If Sleeping, to be called once enough time has elapsed (gets into wall clock vs event clock issues)
+//  // Error if called from any other state
+//  def resume(events: List[I]): Unit = {
+//    // too much garbage if not side-effecting
+//    events.foreach{handleEvent}
+//  }
+//
+//  override def wakeup(): Unit = {}
+//
+//  // this would NOT be a good place for generic map and filter functions for streams!
+//  // reconsider this
+//
+//
+//}

@@ -99,7 +99,7 @@ object Parser {
   type Cache[Token] = KMap[({ type λ[α] = (Token, Parser[Token, α]) })#λ, ({ type λ[α] = () => Parser[Token, α] })#λ]
 
   // creates an empty cache
-  def Cache[Token] = KMap[({ type λ[α] = (Token, Parser[Token, α]) })#λ, ({ type λ[α] = () => Parser[Token, α] })#λ]()
+  def Cache[Token](): Cache[Token] = KMap[({ type λ[α] = (Token, Parser[Token, α]) })#λ, ({ type λ[α] = () => Parser[Token, α] })#λ]()
 
   /**
    * Parser for the empty string, producing a given result.

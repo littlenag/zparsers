@@ -84,6 +84,6 @@ package object parsers {
     }
 
     // parse as much as we can, restarting with each completed parse
-    (inner(parser) eval Cache[Token]) ++ parse(parser)
+    (inner(parser) eval Cache[Token]()) ++ parse(parser)
   }
 }

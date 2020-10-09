@@ -178,7 +178,7 @@ object ParserSpecs extends Specification {
       }
     }
 
-    inner(str)(parser) eval Parser.Cache[T]
+    inner(str)(parser) eval Parser.Cache[T]()
   }
 
   // TODO this also seems useful...

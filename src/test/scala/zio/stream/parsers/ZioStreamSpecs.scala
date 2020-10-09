@@ -24,10 +24,7 @@ import zio.stream._
 import org.scalatest._
 import org.scalatest.matchers.must.Matchers._
 
-object CharParsers extends Parsers with StreamMatchers {
-  override type EventIn = Char
-
-  //implicit override val showEventIn: Show[EventIn] = catsStdShowForChar
+object CharParsers extends ParsersFor[Char] with StreamMatchers[Char] {
 
   val letterA: Parser[Char] = 'A'
 
@@ -60,11 +57,9 @@ object CharParsers extends Parsers with StreamMatchers {
   }
 }
 
-object TickParsers extends Parsers {
+case class Tick(v: Int, t: Int)
 
-  case class Tick(v: Int, t: Int)
-
-  override type EventIn = Tick
+object TickParsers extends ParsersFor[Tick] {
 
   implicit val showEventIn: Show[Tick] = Show.fromToString
 

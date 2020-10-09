@@ -8,7 +8,7 @@ import zio._
 import zio.stream._
 import zio.stream.ZTransducer.Push
 
-trait StreamMatchers { self: Parsers =>
+trait StreamMatchers[I] { self: ParsersFor[I] =>
 
   sealed trait ParseResult[+Result] extends Product with Serializable
   final case class ParseSuccess[+Result](value: Result) extends ParseResult[Result]
@@ -74,8 +74,8 @@ trait StreamMatchers { self: Parsers =>
       // TODO handle other initial parser states
       val initialParser = parser.asInstanceOf[Incomplete[R]]
 
-      val cleanState = (Cache, parser, false)   // have NOT flushed current state?
-      val flushedState = (Cache, parser, true)  // have YES flushed current state?
+      val cleanState = (cache, parser, false)   // have NOT flushed current state?
+      val flushedState = (cache, parser, true)  // have YES flushed current state?
 
       for {
         curState <- ZRef.makeManaged[(Cache, Parser[R], Boolean)](cleanState)
@@ -118,19 +118,19 @@ trait StreamMatchers { self: Parsers =>
                       val ret = (derived.complete(), derived) match {
                         case (Left(Error(msg1)), Completed(value)) =>
                           println(s"unexpected completion: $msg1 with value $value")
-                          (Cache, initialParser, pr += ParseFailure(msg1) )
+                          (cache, initialParser, pr += ParseFailure(msg1) )
 
                         case (Left(Error(msg1)), _@Error(msg2)) =>
                           println(s"completion error: $msg1")
                           println(s"parser-error: $msg2")
-                          (Cache, initialParser, pr += ParseFailure(msg2) )
+                          (cache, initialParser, pr += ParseFailure(msg2) )
 
                         case (Left(Error(msg)), nextParser:Incomplete[R]) =>
                           println(s"incomplete parse. error: $msg")
                           (newCache, nextParser, pr += ParseIncomplete )
 
                         case (Right(Completed(r)), _) =>
-                          (Cache, initialParser, pr += ParseSuccess(r) )
+                          (cache, initialParser, pr += ParseSuccess(r) )
                       }
 
                       println("<<")

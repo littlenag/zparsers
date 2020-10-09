@@ -15,7 +15,7 @@ class ZStreamDriver(clock: Clock) {
     def eventTimestamp(e:E): Instant
   }
 
-  def applyWindow[Env,I:EventTimestamp,O,E](processor: Processor[I,O], stream: ZStream[Env, E, I]): ZStream[Env, E, O] = {
+  def throughProcessor[Env,I:EventTimestamp,O,E](stream: ZStream[Env, E, I], processor: Processor[I,O]): ZStream[Env, E, O] = {
     import processor._
 
     ZStream {

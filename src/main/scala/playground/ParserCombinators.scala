@@ -2,7 +2,7 @@ package playground
 
 import scala.util.parsing.combinator.RegexParsers
 
-object ScalaParsers extends RegexParsers {
+object ParserCombinators {
 
   object Calculator extends RegexParsers {
     def number: Parser[Double] = """\d+(\.\d*)?""".r ^^ { _.toDouble }
